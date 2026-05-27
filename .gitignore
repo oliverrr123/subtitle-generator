@@ -1,0 +1,15 @@
+node_modules
+.next
+out
+dist
+build
+.env
+.env.local
+.env.*.local
+uploads
+renders
+public/uploads
+public/renders
+*.log
+package-lock.json
+.DS_Store
