@@ -124,9 +124,19 @@ button {
     transform 150ms ease;
 }
 
-.dropzone:hover {
+.dropzone:hover,
+.dropzone.dragging {
   border-color: var(--accent);
-  background: #f8f3e8;
+  background: #edf7f3;
+}
+
+.dropzone.dragging {
+  outline: 3px solid rgba(15, 118, 110, 0.16);
+  transform: translateY(-1px);
+}
+
+.dropzone.dragging .drop-icon {
+  background: var(--accent);
 }
 
 .dropzone:active {

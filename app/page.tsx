@@ -3,6 +3,7 @@
 import {
   type CSSProperties,
   type ChangeEvent,
+  type DragEvent,
   useEffect,
   useMemo,
   useState,
@@ -52,6 +53,14 @@ function splitCaptionText(text: string) {
   return text.trim().split(/\s+/).filter(Boolean);
 }
 
+function isVideoFile(file: File) {
+  const extension = file.name.toLowerCase().split(".").pop();
+  return (
+    file.type.startsWith("video/") ||
+    ["mp4", "mov", "webm", "m4v"].includes(extension ?? "")
+  );
+}
+
 export default function Home() {
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoUrl, setVideoUrl] = useState("");
@@ -70,6 +79,7 @@ export default function Home() {
   const [state, setState] = useState<JobState>("idle");
   const [status, setStatus] = useState("Drop in a clip to start.");
   const [renderUrl, setRenderUrl] = useState("");
+  const [isDraggingVideo, setIsDraggingVideo] = useState(false);
 
   const captionLines = useMemo<CaptionLine[]>(
     () =>
@@ -104,9 +114,12 @@ export default function Home() {
     };
   }, [videoUrl]);
 
-  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  function loadVideoFile(file: File) {
+    if (!isVideoFile(file)) {
+      setState("error");
+      setStatus("Drop a video file, like MP4, MOV, or WebM.");
+      return;
+    }
 
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     setVideoFile(file);
@@ -117,7 +130,41 @@ export default function Home() {
     setRenderUrl("");
     setCurrentTime(0);
     setState("idle");
-    setStatus(`${file.name} is ready.`);
+    setStatus(file.name + " is ready.");
+  }
+
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    loadVideoFile(file);
+    event.target.value = "";
+  }
+
+  function handleVideoDragOver(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    if (!isBusy) {
+      event.dataTransfer.dropEffect = "copy";
+      setIsDraggingVideo(true);
+    }
+  }
+
+  function handleVideoDragLeave(event: DragEvent<HTMLLabelElement>) {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      setIsDraggingVideo(false);
+    }
+  }
+
+  function handleVideoDrop(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    setIsDraggingVideo(false);
+
+    if (isBusy) return;
+
+    const file = event.dataTransfer.files?.[0];
+    if (!file) return;
+
+    loadVideoFile(file);
   }
 
   async function transcribeVideo() {
@@ -285,7 +332,12 @@ export default function Home() {
             <div className="badge">MVP</div>
           </div>
 
-          <label className="dropzone">
+          <label
+            className={`dropzone ${isDraggingVideo ? "dragging" : ""}`}
+            onDragOver={handleVideoDragOver}
+            onDragLeave={handleVideoDragLeave}
+            onDrop={handleVideoDrop}
+          >
             <input
               type="file"
               accept="video/mp4,video/quicktime,video/webm,video/x-m4v"
@@ -298,9 +350,13 @@ export default function Home() {
               </div>
               <div>
                 <p className="drop-title">
-                  {videoFile ? videoFile.name : "Upload video"}
+                  {isDraggingVideo
+                    ? "Drop to upload"
+                    : videoFile
+                      ? videoFile.name
+                      : "Upload video"}
                 </p>
-                <p className="drop-meta">MP4, MOV, or WebM</p>
+                <p className="drop-meta">Click or drag in MP4, MOV, or WebM</p>
               </div>
             </div>
           </label>
