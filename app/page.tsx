@@ -6,9 +6,25 @@ import {
   type DragEvent,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
-import { Download, Film, RotateCcw, Upload, WandSparkles } from "lucide-react";
+import {
+  Bookmark,
+  Download,
+  Film,
+  Heart,
+  MessageCircle,
+  MoreHorizontal,
+  Music2,
+  Plus,
+  RotateCcw,
+  Search,
+  Send,
+  Share2,
+  Upload,
+  WandSparkles,
+} from "lucide-react";
 import {
   defaultCaptionSettings,
   getActiveCaption,
@@ -16,6 +32,11 @@ import {
   type CaptionLine,
   type WordTiming,
 } from "@/lib/captions";
+import {
+  captionPresets,
+  defaultCaptionPresetId,
+  type CaptionPresetId,
+} from "@/lib/caption-presets";
 
 type JobState =
   | "idle"
@@ -32,6 +53,7 @@ type RenderJobStatus = {
   encodedFrames: number;
   url?: string;
   error?: string;
+  message?: string;
 };
 
 type EditableCaptionLine = CaptionLine & {
@@ -39,8 +61,84 @@ type EditableCaptionLine = CaptionLine & {
   text: string;
 };
 
+type VideoDimensions = {
+  width: number;
+  height: number;
+};
+
+type PreviewOverlay = "none" | "tiktok" | "instagram";
+type ExportFps = 24 | 30 | 60;
+type VideoDefaults = {
+  previewOverlay: PreviewOverlay;
+  maxWordsPerLine: number;
+  maxLineDuration: number;
+  captionSize: number;
+  captionWidth: number;
+  captionBottom: number;
+  exportFps: ExportFps;
+};
+
+const defaultVideoDimensions: VideoDimensions = {
+  width: 1280,
+  height: 720,
+};
+
+const previewOverlays: { id: PreviewOverlay; name: string }[] = [
+  { id: "none", name: "None" },
+  { id: "tiktok", name: "TikTok" },
+  { id: "instagram", name: "Instagram" },
+];
+
+const exportFpsOptions: ExportFps[] = [24, 30, 60];
+
+const verticalVideoDefaults: VideoDefaults = {
+  previewOverlay: "tiktok",
+  maxWordsPerLine: defaultCaptionSettings.maxWordsPerLine,
+  maxLineDuration: defaultCaptionSettings.maxLineDuration,
+  captionSize: 5.5,
+  captionWidth: 88,
+  captionBottom: 28,
+  exportFps: 30,
+};
+
+const horizontalVideoDefaults: VideoDefaults = {
+  previewOverlay: "none",
+  maxWordsPerLine: 7,
+  maxLineDuration: 2.6,
+  captionSize: 4,
+  captionWidth: 88,
+  captionBottom: 14,
+  exportFps: 60,
+};
+
+function getDefaultsForVideoDimensions(
+  dimensions: VideoDimensions,
+): VideoDefaults {
+  return dimensions.width >= dimensions.height
+    ? horizontalVideoDefaults
+    : verticalVideoDefaults;
+}
+
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function readJsonResponse<T>(response: Response): Promise<T> {
+  const contentType = response.headers.get("content-type") ?? "";
+  const bodyText = await response.text();
+  const normalizedBody = bodyText.replace(/\s+/g, " ").trim();
+
+  if (contentType.includes("application/json")) {
+    try {
+      return JSON.parse(bodyText) as T;
+    } catch {
+      const snippet = normalizedBody.slice(0, 180) || `HTTP ${response.status}`;
+      throw new Error(`Server returned invalid JSON: ${snippet}`);
+    }
+  }
+
+  const snippet = normalizedBody.slice(0, 180) || `HTTP ${response.status}`;
+  throw new Error(`Server returned non-JSON response: ${snippet}`);
 }
 
 function formatTimestamp(seconds: number) {
@@ -61,21 +159,104 @@ function isVideoFile(file: File) {
   );
 }
 
+function PlatformOverlay({ type }: { type: Exclude<PreviewOverlay, "none"> }) {
+  if (type === "instagram") {
+    return (
+      <div className="platform-overlay instagram-overlay" aria-hidden="true">
+        <div className="platform-topbar">
+          <strong>Reels</strong>
+          <div className="platform-top-icons">
+            <Search size={18} />
+            <MoreHorizontal size={18} />
+          </div>
+        </div>
+        <div className="platform-action-rail">
+          <Heart size={22} />
+          <span>12K</span>
+          <MessageCircle size={22} />
+          <span>248</span>
+          <Send size={22} />
+          <Bookmark size={22} />
+          <MoreHorizontal size={22} />
+        </div>
+        <div className="platform-meta">
+          <div className="platform-profile-row">
+            <span className="platform-avatar" />
+            <strong>@creator</strong>
+            <span className="platform-follow">Follow</span>
+          </div>
+          <p>Caption preview area and description sit here...</p>
+          <span className="platform-audio">Original audio - trending sound</span>
+        </div>
+        <div className="platform-home-indicator" />
+        <div className="platform-progress" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="platform-overlay tiktok-overlay" aria-hidden="true">
+      <div className="platform-topbar platform-centered-topbar">
+        <span>Following</span>
+        <strong>For You</strong>
+      </div>
+      <div className="platform-action-rail">
+        <span className="platform-avatar platform-avatar-stacked">
+          <Plus size={12} />
+        </span>
+        <Heart size={22} />
+        <span>88K</span>
+        <MessageCircle size={22} />
+        <span>321</span>
+        <Bookmark size={22} />
+        <Share2 size={22} />
+        <Music2 size={24} />
+      </div>
+      <div className="platform-meta">
+        <strong>@creator</strong>
+        <p>This is where the TikTok description and hashtags appear...</p>
+        <span className="platform-audio">♪ Original sound - creator</span>
+      </div>
+      <div className="platform-tabbar">
+        <span>Home</span>
+        <span>Friends</span>
+        <span>Inbox</span>
+        <span>Profile</span>
+      </div>
+      <div className="platform-progress" />
+    </div>
+  );
+}
+
 export default function Home() {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const autoDwigerFileKeyRef = useRef("");
+  const autoAppliedDefaultsRef = useRef(false);
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoUrl, setVideoUrl] = useState("");
+  const [videoDimensions, setVideoDimensions] = useState<VideoDimensions>(
+    defaultVideoDimensions,
+  );
   const [duration, setDuration] = useState(0);
   const [words, setWords] = useState<WordTiming[]>([]);
   const [transcript, setTranscript] = useState("");
   const [currentTime, setCurrentTime] = useState(0);
   const [maxWordsPerLine, setMaxWordsPerLine] = useState(
-    defaultCaptionSettings.maxWordsPerLine,
+    verticalVideoDefaults.maxWordsPerLine,
   );
   const [maxLineDuration, setMaxLineDuration] = useState(
-    defaultCaptionSettings.maxLineDuration,
+    verticalVideoDefaults.maxLineDuration,
   );
-  const [captionSize, setCaptionSize] = useState(3.2);
-  const [captionWidth, setCaptionWidth] = useState(66);
+  const [captionSize, setCaptionSize] = useState(verticalVideoDefaults.captionSize);
+  const [captionWidth, setCaptionWidth] = useState(verticalVideoDefaults.captionWidth);
+  const [captionBottom, setCaptionBottom] = useState(verticalVideoDefaults.captionBottom);
+  const [captionPresetId, setCaptionPresetId] = useState<CaptionPresetId>(
+    defaultCaptionPresetId,
+  );
+  const [previewOverlay, setPreviewOverlay] =
+    useState<PreviewOverlay>(verticalVideoDefaults.previewOverlay);
+  const [dwigerMode, setDwigerMode] = useState(false);
+  const [exportFps, setExportFps] = useState<ExportFps>(verticalVideoDefaults.exportFps);
   const [state, setState] = useState<JobState>("idle");
   const [status, setStatus] = useState("Drop in a clip to start.");
   const [renderUrl, setRenderUrl] = useState("");
@@ -107,12 +288,36 @@ export default function Home() {
   const isBusy = state === "transcribing" || state === "rendering";
   const canTranscribe = Boolean(videoFile) && !isBusy;
   const canRender = Boolean(videoFile && captionLines.length && duration) && !isBusy;
+  const platformProgress = duration
+    ? Math.min(100, Math.max(0, (currentTime / duration) * 100))
+    : 0;
 
   useEffect(() => {
     return () => {
       if (videoUrl) URL.revokeObjectURL(videoUrl);
     };
   }, [videoUrl]);
+
+  useEffect(() => {
+    if (!dwigerMode || !videoFile || isBusy) return;
+
+    const fileKey = `${videoFile.name}:${videoFile.size}:${videoFile.lastModified}`;
+    if (autoDwigerFileKeyRef.current === fileKey) return;
+
+    autoDwigerFileKeyRef.current = fileKey;
+    void transcribeVideo();
+  }, [dwigerMode, videoFile, isBusy]);
+
+  function applyVideoDefaults(dimensions: VideoDimensions) {
+    const defaults = getDefaultsForVideoDimensions(dimensions);
+    setPreviewOverlay(defaults.previewOverlay);
+    setMaxWordsPerLine(defaults.maxWordsPerLine);
+    setMaxLineDuration(defaults.maxLineDuration);
+    setCaptionSize(defaults.captionSize);
+    setCaptionWidth(defaults.captionWidth);
+    setCaptionBottom(defaults.captionBottom);
+    setExportFps(defaults.exportFps);
+  }
 
   function loadVideoFile(file: File) {
     if (!isVideoFile(file)) {
@@ -124,13 +329,20 @@ export default function Home() {
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     setVideoFile(file);
     setVideoUrl(URL.createObjectURL(file));
+    setVideoDimensions(defaultVideoDimensions);
+    autoAppliedDefaultsRef.current = false;
+    autoDwigerFileKeyRef.current = "";
     setDuration(0);
     setWords([]);
     setTranscript("");
     setRenderUrl("");
     setCurrentTime(0);
     setState("idle");
-    setStatus(file.name + " is ready.");
+    setStatus(
+      dwigerMode
+        ? file.name + " is ready. Starting Dwiger mode..."
+        : file.name + " is ready.",
+    );
   }
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -139,6 +351,19 @@ export default function Home() {
 
     loadVideoFile(file);
     event.target.value = "";
+  }
+
+  function togglePreviewPlayback() {
+    if (previewOverlay === "none") return;
+
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (video.paused) {
+      void video.play();
+    } else {
+      video.pause();
+    }
   }
 
   function handleVideoDragOver(event: DragEvent<HTMLLabelElement>) {
@@ -171,16 +396,26 @@ export default function Home() {
     if (!videoFile) return;
 
     setState("transcribing");
-    setStatus("Extracting audio and generating word timestamps...");
+    setStatus(
+      dwigerMode
+        ? "Extracting audio, transcribing, and rewriting subtitles into Czech..."
+        : "Extracting audio and generating word timestamps...",
+    );
     setRenderUrl("");
 
     const formData = new FormData();
     formData.append("video", videoFile);
+    formData.append("dwigerMode", dwigerMode ? "true" : "false");
     const response = await fetch("/api/transcribe", {
       method: "POST",
       body: formData,
     });
-    const result = await response.json();
+    const result = await readJsonResponse<{
+      error?: string;
+      mode?: "original" | "dwiger";
+      text?: string;
+      words?: WordTiming[];
+    }>(response);
 
     if (!response.ok) {
       setState("error");
@@ -191,7 +426,11 @@ export default function Home() {
     setWords(result.words ?? []);
     setTranscript(result.text ?? "");
     setState("ready");
-    setStatus(`Generated ${result.words?.length ?? 0} word timestamps.`);
+    setStatus(
+      result.mode === "dwiger"
+        ? `Dwiger mode generated ${result.words?.length ?? 0} Czech word timings.`
+        : `Generated ${result.words?.length ?? 0} word timestamps.`,
+    );
   }
 
   function updateCaptionLine(line: EditableCaptionLine, text: string) {
@@ -241,10 +480,15 @@ export default function Home() {
       "payload",
       JSON.stringify({
         durationInSeconds: duration,
+        width: videoDimensions.width,
+        height: videoDimensions.height,
+        exportFps,
         lines: captionLines,
         style: {
+          preset: captionPresetId,
           fontSizePercent: captionSize,
           maxWidthPercent: captionWidth,
+          bottomPercent: captionBottom,
         },
       }),
     );
@@ -254,12 +498,16 @@ export default function Home() {
         method: "POST",
         body: formData,
       });
-      const result = await response.json();
+      const result = await readJsonResponse<{ jobId?: string; error?: string }>(response);
 
       if (!response.ok) {
         setState("error");
         setStatus(result.error ?? "Render failed.");
         return;
+      }
+
+      if (!result.jobId) {
+        throw new Error("Render job did not return a job ID.");
       }
 
       const jobId = String(result.jobId);
@@ -270,7 +518,7 @@ export default function Home() {
           "/api/render?jobId=" + encodeURIComponent(jobId),
           { cache: "no-store" },
         );
-        const job = (await statusResponse.json()) as RenderJobStatus;
+        const job = await readJsonResponse<RenderJobStatus>(statusResponse);
 
         if (!statusResponse.ok) {
           setState("error");
@@ -291,8 +539,14 @@ export default function Home() {
           return;
         }
 
+        if (job.status === "queued") {
+          setStatus(job.message ?? "Preparing video for render...");
+          continue;
+        }
+
         setStatus(
-          "Rendering the subtitled MP4... " +
+          (job.message ?? "Rendering the subtitled MP4...") +
+            " " +
             job.progress +
             "% (" +
             job.renderedFrames +
@@ -317,6 +571,7 @@ export default function Home() {
     setCurrentTime(0);
     setRenderUrl("");
     setState("idle");
+    autoDwigerFileKeyRef.current = "";
     setStatus("Drop in a clip to start.");
   }
 
@@ -363,7 +618,63 @@ export default function Home() {
 
           <section className="section">
             <div className="section-header">
+              <h2 className="section-title">Translation Mode</h2>
+            </div>
+            <label className="mode-toggle">
+              <input
+                type="checkbox"
+                checked={dwigerMode}
+                disabled={isBusy}
+                onChange={(event) => setDwigerMode(event.target.checked)}
+              />
+              <span className="mode-switch" aria-hidden="true" />
+              <span className="mode-copy">
+                <strong>Dwiger mode</strong>
+                <span>Rewrite subtitles into natural Czech after transcription</span>
+              </span>
+            </label>
+          </section>
+
+          <section className="section">
+            <div className="section-header">
               <h2 className="section-title">Caption Style</h2>
+            </div>
+            <div className="preset-picker" aria-label="Caption preset">
+              {captionPresets.map((preset) => (
+                <button
+                  className={`preset-option ${
+                    captionPresetId === preset.id ? "selected" : ""
+                  }`}
+                  type="button"
+                  key={preset.id}
+                  aria-pressed={captionPresetId === preset.id}
+                  onClick={() => setCaptionPresetId(preset.id)}
+                >
+                  <span>{preset.name}</span>
+                  <small>{preset.description}</small>
+                </button>
+              ))}
+            </div>
+            <div className="overlay-setting">
+              <span className="setting-label">
+                <strong>Platform guide</strong>
+                <span>Preview only, not exported</span>
+              </span>
+              <div className="overlay-picker" aria-label="Platform preview overlay">
+                {previewOverlays.map((overlay) => (
+                  <button
+                    className={`overlay-option ${
+                      previewOverlay === overlay.id ? "selected" : ""
+                    }`}
+                    type="button"
+                    key={overlay.id}
+                    aria-pressed={previewOverlay === overlay.id}
+                    onClick={() => setPreviewOverlay(overlay.id)}
+                  >
+                    {overlay.name}
+                  </button>
+                ))}
+              </div>
             </div>
             <label className="setting-row">
               <span className="setting-label">
@@ -430,6 +741,48 @@ export default function Home() {
                 }
               />
             </label>
+            <label className="setting-row setting-row-stacked">
+              <span className="setting-label">
+                <strong>Caption height</strong>
+                <span>{captionBottom}% from bottom</span>
+              </span>
+              <input
+                className="range-input"
+                type="range"
+                min="4"
+                max="42"
+                step="1"
+                value={captionBottom}
+                onChange={(event) =>
+                  setCaptionBottom(Number(event.target.value))
+                }
+              />
+            </label>
+          </section>
+
+          <section className="section">
+            <div className="section-header">
+              <h2 className="section-title">Export Settings</h2>
+            </div>
+            <div className="export-setting">
+              <span className="setting-label">
+                <strong>Frame rate</strong>
+                <span>{exportFps} FPS MP4 export</span>
+              </span>
+              <div className="fps-picker" aria-label="Export frame rate">
+                {exportFpsOptions.map((fps) => (
+                  <button
+                    className={`fps-option ${exportFps === fps ? "selected" : ""}`}
+                    type="button"
+                    key={fps}
+                    aria-pressed={exportFps === fps}
+                    onClick={() => setExportFps(fps)}
+                  >
+                    {fps}
+                  </button>
+                ))}
+              </div>
+            </div>
           </section>
 
           <div className="action-row">
@@ -521,14 +874,36 @@ export default function Home() {
 
         <section className="preview-panel">
           <div className="preview-stage">
-            <div className="video-wrap">
+            <div
+              className="video-wrap"
+              style={
+                {
+                  "--video-aspect": videoDimensions.width / videoDimensions.height,
+                  "--preview-progress": `${platformProgress}%`,
+                } as CSSProperties
+              }
+            >
               {videoUrl ? (
                 <video
+                  ref={videoRef}
                   src={videoUrl}
-                  controls
-                  onLoadedMetadata={(event) =>
-                    setDuration(event.currentTarget.duration)
-                  }
+                  controls={previewOverlay === "none"}
+                  onClick={togglePreviewPlayback}
+                  onLoadedMetadata={(event) => {
+                    const video = event.currentTarget;
+                    setDuration(video.duration);
+                    if (video.videoWidth && video.videoHeight) {
+                      const dimensions = {
+                        width: video.videoWidth,
+                        height: video.videoHeight,
+                      };
+                      setVideoDimensions(dimensions);
+                      if (!autoAppliedDefaultsRef.current) {
+                        applyVideoDefaults(dimensions);
+                        autoAppliedDefaultsRef.current = true;
+                      }
+                    }
+                  }}
                   onTimeUpdate={(event) =>
                     setCurrentTime(event.currentTarget.currentTime)
                   }
@@ -542,10 +917,22 @@ export default function Home() {
                 </div>
               )}
 
+              {videoUrl && previewOverlay !== "none" ? (
+                <PlatformOverlay type={previewOverlay} />
+              ) : null}
+
               {activeCaption ? (
-                <div className="caption-overlay">
+                <div
+                  className="caption-overlay"
+                  style={
+                    {
+                      "--caption-bottom": `${captionBottom}%`,
+                    } as CSSProperties
+                  }
+                >
                   <div
                     className="caption-pill"
+                    data-preset={captionPresetId}
                     style={
                       {
                         "--caption-size": captionSize,

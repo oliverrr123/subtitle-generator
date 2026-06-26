@@ -10,6 +10,13 @@ export const maxDuration = 300;
 
 const retryableStatuses = new Set([429, 500, 502, 503, 504]);
 
+type TimedTextLine = {
+  id: string;
+  start: number;
+  end: number;
+  text: string;
+};
+
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -53,6 +60,97 @@ async function transcribeWithRetry(openai: OpenAI, audioPath: string) {
   throw lastError;
 }
 
+function parseJsonObject(text: string) {
+  const trimmed = text.trim();
+  const unfenced = trimmed
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "");
+
+  return JSON.parse(unfenced) as unknown;
+}
+
+function splitWords(text: string) {
+  return text
+    .trim()
+    .replace(/\s+/g, " ")
+    .split(" ")
+    .filter(Boolean);
+}
+
+function distributeWordsAcrossLine(line: TimedTextLine): WordTiming[] {
+  const tokens = splitWords(line.text);
+  if (!tokens.length) return [];
+
+  const duration = Math.max(0.08, line.end - line.start);
+  const step = duration / tokens.length;
+
+  return tokens.map((word, index) => {
+    const start = line.start + step * index;
+    const end = index === tokens.length - 1 ? line.end : line.start + step * (index + 1);
+
+    return {
+      word,
+      start: Number(start.toFixed(3)),
+      end: Number(end.toFixed(3)),
+    };
+  });
+}
+
+async function translateLinesToNaturalCzech(
+  openai: OpenAI,
+  sourceLines: TimedTextLine[],
+) {
+  if (!sourceLines.length) return [];
+
+  const completion = await openai.chat.completions.create({
+    model: process.env.OPENAI_TRANSLATION_MODEL ?? "gpt-4o-mini",
+    response_format: { type: "json_object" },
+    temperature: 0.45,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You rewrite short-form video subtitles into natural Czech. Prioritize natural, idiomatic Czech over literal word-for-word meaning. Keep the tone casual and spoken when the source sounds casual. Keep subtitles concise and readable. Return only valid JSON.",
+      },
+      {
+        role: "user",
+        content: JSON.stringify({
+          task:
+            "Translate/rewrite each timed subtitle chunk into natural Czech. Preserve the same ids. Do not include commentary.",
+          outputShape: {
+            lines: [{ id: "caption-0", text: "Přirozený český titulek" }],
+          },
+          lines: sourceLines.map((line) => ({
+            id: line.id,
+            text: line.text,
+          })),
+        }),
+      },
+    ],
+  });
+
+  const content = completion.choices[0]?.message.content ?? "";
+  const parsed = parseJsonObject(content);
+  const translatedLines =
+    typeof parsed === "object" &&
+    parsed &&
+    "lines" in parsed &&
+    Array.isArray((parsed as { lines?: unknown }).lines)
+      ? (parsed as { lines: Array<{ id?: unknown; text?: unknown }> }).lines
+      : [];
+
+  const translations = new Map(
+    translatedLines
+      .map((line) => [String(line.id ?? ""), String(line.text ?? "").trim()] as const)
+      .filter(([id, text]) => id && text),
+  );
+
+  return sourceLines.map((line) => ({
+    ...line,
+    text: translations.get(line.id) ?? line.text,
+  }));
+}
+
 export async function POST(request: Request) {
   try {
     if (!process.env.OPENAI_API_KEY) {
@@ -64,6 +162,7 @@ export async function POST(request: Request) {
 
     const formData = await request.formData();
     const video = formData.get("video");
+    const dwigerMode = formData.get("dwigerMode") === "true";
 
     if (!(video instanceof File)) {
       return Response.json({ error: "Upload a video file." }, { status: 400 });
@@ -98,10 +197,29 @@ export async function POST(request: Request) {
       }))
       .filter((word) => word.word.trim() && Number.isFinite(word.start));
 
+    if (!dwigerMode) {
+      return Response.json({
+        text: transcript.text,
+        words,
+        lines: groupWordsIntoLines(words),
+        mode: "original",
+      });
+    }
+
+    const sourceLines: TimedTextLine[] = groupWordsIntoLines(words).map((line) => ({
+      id: line.id,
+      start: line.start,
+      end: line.end,
+      text: line.words.map((word) => word.word).join(" "),
+    }));
+    const czechLines = await translateLinesToNaturalCzech(openai, sourceLines);
+    const czechWords = czechLines.flatMap(distributeWordsAcrossLine);
+
     return Response.json({
-      text: transcript.text,
-      words,
-      lines: groupWordsIntoLines(words),
+      text: czechLines.map((line) => line.text).join(" "),
+      words: czechWords,
+      lines: groupWordsIntoLines(czechWords),
+      mode: "dwiger",
     });
   } catch (error) {
     console.error(error);
