@@ -6,7 +6,14 @@ import { z } from "zod";
 import { type CaptionLine } from "@/lib/captions";
 import { captionPresetIds, type CaptionPresetId } from "@/lib/caption-presets";
 import { overlayImageSequenceOnVideo } from "@/lib/ffmpeg";
-import { createJobId, saveUpload, workspaceRoot } from "@/lib/files";
+import {
+  createJobId,
+  saveUploadBytes,
+  uploadedFileExists,
+  uploadPath,
+  workspaceRoot,
+} from "@/lib/files";
+import { parseMultipartRequest } from "@/lib/multipart";
 
 export const runtime = "nodejs";
 export const maxDuration = 600;
@@ -57,6 +64,15 @@ const renderPayloadSchema = z.object({
     .optional(),
 });
 
+const renderRequestSchema = z.object({
+  video: z.object({
+    name: z.string().min(1),
+    contentType: z.string().optional(),
+    data: z.string().min(1),
+  }),
+  payload: renderPayloadSchema,
+});
+
 type RenderInputProps = {
   lines: CaptionLine[];
   durationInSeconds: number;
@@ -71,18 +87,97 @@ type RenderInputProps = {
   };
 };
 
+async function readRenderRequest(request: Request, directory: string) {
+  const contentType = request.headers.get("content-type") ?? "";
+
+  if (contentType.toLowerCase().includes("application/json")) {
+    const rawBody = await request.json();
+    const uploadBody = rawBody as {
+      uploadId?: unknown;
+      name?: unknown;
+      payload?: unknown;
+    };
+    const uploadId = String(uploadBody.uploadId ?? "");
+    const name = String(uploadBody.name ?? "upload.mp4");
+
+    if (uploadId) {
+      if (!(await uploadedFileExists(uploadId, name))) {
+        return {
+          videoPath: null,
+          payload: null,
+          cleanupVideo: false,
+          error: "Uploaded video was not found. Select the video again.",
+        };
+      }
+
+      return {
+        videoPath: uploadPath(uploadId, name),
+        payload: renderPayloadSchema.parse(uploadBody.payload),
+        cleanupVideo: false,
+        error: null,
+      };
+    }
+
+    const body = renderRequestSchema.parse(rawBody);
+    const videoPath = await saveUploadBytes(
+      body.video.name,
+      Buffer.from(body.video.data, "base64"),
+      directory,
+    );
+
+    return {
+      videoPath,
+      payload: body.payload,
+      cleanupVideo: true,
+      error: null,
+    };
+  }
+
+  try {
+    const parts = await parseMultipartRequest(request);
+    const video = parts.get("video");
+    const payload = parts.get("payload")?.data.toString("utf8");
+
+    if (!video || !payload) {
+      return {
+        videoPath: null,
+        payload: null,
+        cleanupVideo: false,
+        error: "Upload a video and caption payload.",
+      };
+    }
+
+    return {
+      videoPath: await saveUploadBytes(video.filename ?? "upload.mp4", video.data, directory),
+      payload: renderPayloadSchema.parse(JSON.parse(payload)),
+      cleanupVideo: true,
+      error: null,
+    };
+  } catch {
+    return {
+      videoPath: null,
+      payload: null,
+      cleanupVideo: false,
+      error:
+        "Could not read the uploaded video. Try selecting the file again, or use a smaller MP4/MOV/WebM file.",
+    };
+  }
+}
+
 async function renderJob({
   jobId,
   uploadedVideoPath,
   outputPath,
   overlayFramesDir,
   inputProps,
+  cleanupInput,
 }: {
   jobId: string;
   uploadedVideoPath: string;
   outputPath: string;
   overlayFramesDir: string;
   inputProps: RenderInputProps;
+  cleanupInput: boolean;
 }) {
   const job = renderJobs.get(jobId);
   if (!job) return;
@@ -155,7 +250,9 @@ async function renderJob({
       },
     });
 
-    await rm(uploadedVideoPath, { force: true });
+    if (cleanupInput) {
+      await rm(uploadedVideoPath, { force: true });
+    }
     await rm(overlayFramesDir, { recursive: true, force: true });
 
     job.status = "done";
@@ -187,23 +284,18 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const formData = await request.formData();
-    const video = formData.get("video");
-    const payloadText = formData.get("payload");
-
-    if (!(video instanceof File) || typeof payloadText !== "string") {
-      return Response.json(
-        { error: "Upload a video and caption payload." },
-        { status: 400 },
-      );
-    }
-
-    const payload = renderPayloadSchema.parse(JSON.parse(payloadText));
     const jobId = createJobId();
     const publicJobDir = path.join(workspaceRoot, "public", "renders", jobId);
     await mkdir(publicJobDir, { recursive: true });
 
-    const videoPath = await saveUpload(video, publicJobDir);
+    const { videoPath, payload, cleanupVideo, error } = await readRenderRequest(
+      request,
+      publicJobDir,
+    );
+    if (!videoPath || !payload) {
+      return Response.json({ error }, { status: 400 });
+    }
+
     const outputPath = path.join(publicJobDir, "subtitled.mp4");
     const overlayFramesDir = path.join(publicJobDir, "overlay-frames");
     const inputProps: RenderInputProps = {
@@ -229,6 +321,7 @@ export async function POST(request: Request) {
       outputPath,
       overlayFramesDir,
       inputProps,
+      cleanupInput: cleanupVideo,
     });
 
     return Response.json({

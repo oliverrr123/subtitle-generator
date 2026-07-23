@@ -4,6 +4,8 @@ import {
   type CSSProperties,
   type ChangeEvent,
   type DragEvent,
+  type WheelEvent,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -27,6 +29,7 @@ import {
 } from "lucide-react";
 import {
   defaultCaptionSettings,
+  fitSingleLineFontSize,
   getActiveCaption,
   groupWordsIntoLines,
   type CaptionLine,
@@ -77,6 +80,42 @@ type VideoDefaults = {
   captionBottom: number;
   exportFps: ExportFps;
 };
+
+type VideoSource = {
+  uploadId: string;
+  name: string;
+  type: string;
+  size: number;
+};
+
+async function uploadVideoFile(file: File): Promise<VideoSource> {
+  const response = await fetch("/api/upload", {
+    method: "POST",
+    headers: {
+      "content-type": file.type || "application/octet-stream",
+      "x-file-name": encodeURIComponent(file.name),
+    },
+    body: file,
+  });
+  const result = await readJsonResponse<{
+    uploadId?: string;
+    name?: string;
+    type?: string;
+    size?: number;
+    error?: string;
+  }>(response);
+
+  if (!response.ok || !result.uploadId) {
+    throw new Error(result.error ?? "Could not upload the video.");
+  }
+
+  return {
+    uploadId: result.uploadId,
+    name: result.name ?? file.name,
+    type: result.type ?? file.type ?? "application/octet-stream",
+    size: result.size ?? file.size,
+  };
+}
 
 const defaultVideoDimensions: VideoDimensions = {
   width: 1280,
@@ -159,10 +198,41 @@ function isVideoFile(file: File) {
   );
 }
 
-function PlatformOverlay({ type }: { type: Exclude<PreviewOverlay, "none"> }) {
+function isFileAccessError(error: unknown) {
+  if (!(error instanceof Error)) return false;
+
+  return /requested file could not be read|permission|not readable/i.test(error.message);
+}
+
+function PlatformOverlay({
+  type,
+  currentTime,
+  duration,
+  onSeek,
+}: {
+  type: Exclude<PreviewOverlay, "none">;
+  currentTime: number;
+  duration: number;
+  onSeek: (time: number) => void;
+}) {
+  const timeline = (
+    <input
+      aria-label="Video timeline"
+      className="platform-progress"
+      type="range"
+      min={0}
+      max={duration || 0}
+      step="0.01"
+      value={Math.min(currentTime, duration || 0)}
+      disabled={!duration}
+      onChange={(event) => onSeek(Number(event.currentTarget.value))}
+      onClick={(event) => event.stopPropagation()}
+    />
+  );
+
   if (type === "instagram") {
     return (
-      <div className="platform-overlay instagram-overlay" aria-hidden="true">
+      <div className="platform-overlay instagram-overlay">
         <div className="platform-topbar">
           <strong>Reels</strong>
           <div className="platform-top-icons">
@@ -189,13 +259,13 @@ function PlatformOverlay({ type }: { type: Exclude<PreviewOverlay, "none"> }) {
           <span className="platform-audio">Original audio - trending sound</span>
         </div>
         <div className="platform-home-indicator" />
-        <div className="platform-progress" />
+        {timeline}
       </div>
     );
   }
 
   return (
-    <div className="platform-overlay tiktok-overlay" aria-hidden="true">
+    <div className="platform-overlay tiktok-overlay">
       <div className="platform-topbar platform-centered-topbar">
         <span>Following</span>
         <strong>For You</strong>
@@ -223,23 +293,26 @@ function PlatformOverlay({ type }: { type: Exclude<PreviewOverlay, "none"> }) {
         <span>Inbox</span>
         <span>Profile</span>
       </div>
-      <div className="platform-progress" />
+      {timeline}
     </div>
   );
 }
 
 export default function Home() {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const controlPanelRef = useRef<HTMLElement>(null);
+  const captionListRef = useRef<HTMLDivElement>(null);
+  const captionRowRefs = useRef<(HTMLLabelElement | null)[]>([]);
   const autoDwigerFileKeyRef = useRef("");
   const autoAppliedDefaultsRef = useRef(false);
-  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const transcribeInFlightRef = useRef(false);
+  const [videoSource, setVideoSource] = useState<VideoSource | null>(null);
   const [videoUrl, setVideoUrl] = useState("");
   const [videoDimensions, setVideoDimensions] = useState<VideoDimensions>(
     defaultVideoDimensions,
   );
   const [duration, setDuration] = useState(0);
   const [words, setWords] = useState<WordTiming[]>([]);
-  const [transcript, setTranscript] = useState("");
   const [currentTime, setCurrentTime] = useState(0);
   const [maxWordsPerLine, setMaxWordsPerLine] = useState(
     verticalVideoDefaults.maxWordsPerLine,
@@ -285,9 +358,15 @@ export default function Home() {
     });
   }, [captionLines]);
   const activeCaption = getActiveCaption(captionLines, currentTime);
+  const activeCaptionIndex = activeCaption
+    ? captionLines.findIndex((line) => line.id === activeCaption.id)
+    : -1;
+  const fittedCaptionSize = activeCaption
+    ? fitSingleLineFontSize(activeCaption.words, captionSize, captionWidth)
+    : captionSize;
   const isBusy = state === "transcribing" || state === "rendering";
-  const canTranscribe = Boolean(videoFile) && !isBusy;
-  const canRender = Boolean(videoFile && captionLines.length && duration) && !isBusy;
+  const canTranscribe = Boolean(videoSource) && !isBusy;
+  const canRender = Boolean(videoSource && captionLines.length && duration) && !isBusy;
   const platformProgress = duration
     ? Math.min(100, Math.max(0, (currentTime / duration) * 100))
     : 0;
@@ -299,14 +378,28 @@ export default function Home() {
   }, [videoUrl]);
 
   useEffect(() => {
-    if (!dwigerMode || !videoFile || isBusy) return;
+    if (activeCaptionIndex < 0) return;
 
-    const fileKey = `${videoFile.name}:${videoFile.size}:${videoFile.lastModified}`;
-    if (autoDwigerFileKeyRef.current === fileKey) return;
+    const list = captionListRef.current;
+    const row = captionRowRefs.current[activeCaptionIndex];
+    if (!list || !row) return;
 
-    autoDwigerFileKeyRef.current = fileKey;
-    void transcribeVideo();
-  }, [dwigerMode, videoFile, isBusy]);
+    const listRect = list.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+    const rowIsVisible =
+      rowRect.top >= listRect.top && rowRect.bottom <= listRect.bottom;
+
+    if (!rowIsVisible) {
+      list.scrollTo({
+        top:
+          list.scrollTop +
+          rowRect.top -
+          listRect.top -
+          (list.clientHeight - rowRect.height) / 2,
+        behavior: "smooth",
+      });
+    }
+  }, [activeCaptionIndex]);
 
   function applyVideoDefaults(dimensions: VideoDimensions) {
     const defaults = getDefaultsForVideoDimensions(dimensions);
@@ -319,38 +412,71 @@ export default function Home() {
     setExportFps(defaults.exportFps);
   }
 
-  function loadVideoFile(file: File) {
+  async function loadVideoFile(file: File) {
     if (!isVideoFile(file)) {
       setState("error");
       setStatus("Drop a video file, like MP4, MOV, or WebM.");
       return;
     }
 
+    const shouldPreserveCaptions = words.length > 0;
+    setState("idle");
+    setStatus(
+      shouldPreserveCaptions
+        ? "Uploading video without changing captions..."
+        : "Uploading video...",
+    );
+
+    let nextVideoSource: VideoSource;
+    try {
+      nextVideoSource = await uploadVideoFile(file);
+    } catch (error) {
+      setState("error");
+      setStatus(
+        isFileAccessError(error)
+          ? "The selected video could not be uploaded. Try copying it to a local folder and selecting it again."
+          : error instanceof Error
+            ? error.message
+            : "The selected video could not be uploaded.",
+      );
+      return;
+    }
+
     if (videoUrl) URL.revokeObjectURL(videoUrl);
-    setVideoFile(file);
+    setVideoSource(nextVideoSource);
     setVideoUrl(URL.createObjectURL(file));
+    setRenderUrl("");
+    setState("idle");
+
+    if (shouldPreserveCaptions) {
+      autoAppliedDefaultsRef.current = true;
+      autoDwigerFileKeyRef.current = nextVideoSource.uploadId;
+      setStatus(nextVideoSource.name + " reconnected. Your edited captions were preserved.");
+      return;
+    }
+
     setVideoDimensions(defaultVideoDimensions);
     autoAppliedDefaultsRef.current = false;
     autoDwigerFileKeyRef.current = "";
     setDuration(0);
     setWords([]);
-    setTranscript("");
-    setRenderUrl("");
     setCurrentTime(0);
-    setState("idle");
     setStatus(
       dwigerMode
-        ? file.name + " is ready. Starting Dwiger mode..."
-        : file.name + " is ready.",
+        ? nextVideoSource.name + " is ready. Starting Dwiger mode..."
+        : nextVideoSource.name + " uploaded. Starting transcription...",
     );
   }
 
-  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+  async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    loadVideoFile(file);
-    event.target.value = "";
+    try {
+      await loadVideoFile(file);
+    } finally {
+      event.target.value = "";
+    }
   }
 
   function togglePreviewPlayback() {
@@ -364,6 +490,15 @@ export default function Home() {
     } else {
       video.pause();
     }
+  }
+
+  function seekPreview(time: number) {
+    const video = videoRef.current;
+    if (!video || !Number.isFinite(time)) return;
+
+    const nextTime = Math.min(Math.max(time, 0), video.duration || duration || 0);
+    video.currentTime = nextTime;
+    setCurrentTime(nextTime);
   }
 
   function handleVideoDragOver(event: DragEvent<HTMLLabelElement>) {
@@ -380,7 +515,7 @@ export default function Home() {
     }
   }
 
-  function handleVideoDrop(event: DragEvent<HTMLLabelElement>) {
+  async function handleVideoDrop(event: DragEvent<HTMLLabelElement>) {
     event.preventDefault();
     setIsDraggingVideo(false);
 
@@ -389,12 +524,13 @@ export default function Home() {
     const file = event.dataTransfer.files?.[0];
     if (!file) return;
 
-    loadVideoFile(file);
+    await loadVideoFile(file);
   }
 
-  async function transcribeVideo() {
-    if (!videoFile) return;
+  const transcribeVideo = useCallback(async () => {
+    if (!videoSource || transcribeInFlightRef.current) return;
 
+    transcribeInFlightRef.current = true;
     setState("transcribing");
     setStatus(
       dwigerMode
@@ -403,35 +539,61 @@ export default function Home() {
     );
     setRenderUrl("");
 
-    const formData = new FormData();
-    formData.append("video", videoFile);
-    formData.append("dwigerMode", dwigerMode ? "true" : "false");
-    const response = await fetch("/api/transcribe", {
-      method: "POST",
-      body: formData,
-    });
-    const result = await readJsonResponse<{
-      error?: string;
-      mode?: "original" | "dwiger";
-      text?: string;
-      words?: WordTiming[];
-    }>(response);
+    try {
+      const response = await fetch("/api/transcribe", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          uploadId: videoSource.uploadId,
+          name: videoSource.name,
+          dwigerMode,
+        }),
+      });
+      const result = await readJsonResponse<{
+        error?: string;
+        mode?: "original" | "dwiger";
+        text?: string;
+        words?: WordTiming[];
+      }>(response);
 
-    if (!response.ok) {
+      if (!response.ok) {
+        setState("error");
+        setStatus(result.error ?? "Transcription failed.");
+        return;
+      }
+
+      setWords(result.words ?? []);
+      setState("ready");
+      setStatus(
+        result.mode === "dwiger"
+          ? `Dwiger mode generated ${result.words?.length ?? 0} Czech word timings.`
+          : `Generated ${result.words?.length ?? 0} word timestamps.`,
+      );
+    } catch (error) {
       setState("error");
-      setStatus(result.error ?? "Transcription failed.");
-      return;
+      setStatus(
+        isFileAccessError(error)
+          ? "The browser lost access to the selected video before it could be copied. Select the video again; existing captions will be preserved."
+          : error instanceof Error
+            ? error.message
+            : "Transcription failed.",
+      );
+    } finally {
+      transcribeInFlightRef.current = false;
     }
+  }, [dwigerMode, videoSource]);
 
-    setWords(result.words ?? []);
-    setTranscript(result.text ?? "");
-    setState("ready");
-    setStatus(
-      result.mode === "dwiger"
-        ? `Dwiger mode generated ${result.words?.length ?? 0} Czech word timings.`
-        : `Generated ${result.words?.length ?? 0} word timestamps.`,
-    );
-  }
+  useEffect(() => {
+    if (!videoSource || isBusy) return;
+
+    const fileKey = videoSource.uploadId;
+    if (autoDwigerFileKeyRef.current === fileKey) return;
+
+    autoDwigerFileKeyRef.current = fileKey;
+    void transcribeVideo();
+  }, [videoSource, isBusy, transcribeVideo]);
 
   function updateCaptionLine(line: EditableCaptionLine, text: string) {
     const tokens = splitCaptionText(text);
@@ -457,7 +619,6 @@ export default function Home() {
         ...previousWords.slice(endIndex),
       ];
 
-      setTranscript(nextWords.map((word) => word.word).join(" "));
       return nextWords;
     });
 
@@ -469,34 +630,34 @@ export default function Home() {
   }
 
   async function renderVideo() {
-    if (!videoFile || !captionLines.length || !duration) return;
+    if (!videoSource || !captionLines.length || !duration) return;
 
     setState("rendering");
     setStatus("Starting render...");
 
-    const formData = new FormData();
-    formData.append("video", videoFile);
-    formData.append(
-      "payload",
-      JSON.stringify({
-        durationInSeconds: duration,
-        width: videoDimensions.width,
-        height: videoDimensions.height,
-        exportFps,
-        lines: captionLines,
-        style: {
-          preset: captionPresetId,
-          fontSizePercent: captionSize,
-          maxWidthPercent: captionWidth,
-          bottomPercent: captionBottom,
-        },
-      }),
-    );
-
     try {
       const response = await fetch("/api/render", {
         method: "POST",
-        body: formData,
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          uploadId: videoSource.uploadId,
+          name: videoSource.name,
+          payload: {
+            durationInSeconds: duration,
+            width: videoDimensions.width,
+            height: videoDimensions.height,
+            exportFps,
+            lines: captionLines,
+            style: {
+              preset: captionPresetId,
+              fontSizePercent: captionSize,
+              maxWidthPercent: captionWidth,
+              bottomPercent: captionBottom,
+            },
+          },
+        }),
       });
       const result = await readJsonResponse<{ jobId?: string; error?: string }>(response);
 
@@ -557,17 +718,22 @@ export default function Home() {
       }
     } catch (error) {
       setState("error");
-      setStatus(error instanceof Error ? error.message : "Render failed.");
+      setStatus(
+        isFileAccessError(error)
+          ? "The browser lost access to the selected video before it could be copied. Select the video again; existing captions will be preserved."
+          : error instanceof Error
+            ? error.message
+            : "Render failed.",
+      );
     }
   }
 
   function resetProject() {
     if (videoUrl) URL.revokeObjectURL(videoUrl);
-    setVideoFile(null);
+    setVideoSource(null);
     setVideoUrl("");
     setDuration(0);
     setWords([]);
-    setTranscript("");
     setCurrentTime(0);
     setRenderUrl("");
     setState("idle");
@@ -575,18 +741,24 @@ export default function Home() {
     setStatus("Drop in a clip to start.");
   }
 
+  function handleWorkspaceWheel(event: WheelEvent<HTMLDivElement>) {
+    if (window.innerWidth <= 960) return;
+
+    const controlPanel = controlPanelRef.current;
+    if (!controlPanel || controlPanel.contains(event.target as Node)) return;
+
+    event.preventDefault();
+    controlPanel.scrollBy({
+      top: event.deltaY,
+      left: event.deltaX,
+      behavior: "auto",
+    });
+  }
+
   return (
     <main className="app-shell">
-      <div className="workspace">
-        <aside className="control-panel">
-          <div className="brand-row">
-            <div className="brand">
-              <h1>Subtitle Generator</h1>
-              <p>Word-by-word captions for short horizontal clips.</p>
-            </div>
-            <div className="badge">MVP</div>
-          </div>
-
+      <div className="workspace" onWheel={handleWorkspaceWheel}>
+        <aside className="control-panel" ref={controlPanelRef}>
           <label
             className={`dropzone ${isDraggingVideo ? "dragging" : ""}`}
             onDragOver={handleVideoDragOver}
@@ -607,8 +779,8 @@ export default function Home() {
                 <p className="drop-title">
                   {isDraggingVideo
                     ? "Drop to upload"
-                    : videoFile
-                      ? videoFile.name
+                    : videoSource
+                      ? videoSource.name
                       : "Upload video"}
                 </p>
                 <p className="drop-meta">Click or drag in MP4, MOV, or WebM</p>
@@ -808,7 +980,7 @@ export default function Home() {
               className="icon-button"
               type="button"
               onClick={resetProject}
-              disabled={isBusy && !videoFile}
+              disabled={isBusy && !videoSource}
               aria-label="Reset"
               title="Reset"
             >
@@ -830,15 +1002,21 @@ export default function Home() {
 
           {editableCaptionLines.length ? (
             <section className="section caption-editor">
-              <div className="section-header">
+              <div className="caption-editor-header">
                 <h2 className="section-title">Caption Editor</h2>
                 <span className="caption-count">{editableCaptionLines.length}</span>
               </div>
-              <div className="caption-edit-list">
-                {editableCaptionLines.map((line) => (
+              <div className="caption-edit-list" ref={captionListRef}>
+                {editableCaptionLines.map((line, index) => (
                   <label
-                    className="caption-edit-row"
+                    className={`caption-edit-row ${
+                      index === activeCaptionIndex ? "active" : ""
+                    }`}
                     key={line.id + "-" + line.start + "-" + line.end + "-" + line.text}
+                    ref={(element) => {
+                      captionRowRefs.current[index] = element;
+                    }}
+                    onClick={() => seekPreview(line.start)}
                   >
                     <span className="caption-time">
                       {formatTimestamp(line.start)} - {formatTimestamp(line.end)}
@@ -864,12 +1042,6 @@ export default function Home() {
             </section>
           ) : null}
 
-          {transcript ? (
-            <section className="section">
-              <h2 className="section-title">Transcript</h2>
-              <div className="transcript-box">{transcript}</div>
-            </section>
-          ) : null}
         </aside>
 
         <section className="preview-panel">
@@ -918,7 +1090,12 @@ export default function Home() {
               )}
 
               {videoUrl && previewOverlay !== "none" ? (
-                <PlatformOverlay type={previewOverlay} />
+                <PlatformOverlay
+                  type={previewOverlay}
+                  currentTime={currentTime}
+                  duration={duration}
+                  onSeek={seekPreview}
+                />
               ) : null}
 
               {activeCaption ? (
@@ -935,7 +1112,7 @@ export default function Home() {
                     data-preset={captionPresetId}
                     style={
                       {
-                        "--caption-size": captionSize,
+                        "--caption-size": fittedCaptionSize,
                         "--caption-width": `${captionWidth}%`,
                       } as CSSProperties
                     }

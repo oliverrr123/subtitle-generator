@@ -6,7 +6,11 @@ import {
   useVideoConfig,
 } from "remotion";
 import { type CSSProperties } from "react";
-import { getActiveCaption, type CaptionLine } from "../lib/captions";
+import {
+  fitSingleLineFontSize,
+  getActiveCaption,
+  type CaptionLine,
+} from "../lib/captions";
 import {
   defaultCaptionPresetId,
   isCaptionPresetId,
@@ -185,8 +189,11 @@ export function SubtitleVideo({
     ? style.preset
     : defaultCaptionPresetId;
   const presetStyle = renderPresetStyles[presetId];
-  const fontSize = width * ((style?.fontSizePercent ?? 5.5) / 100);
   const maxWidth = width * ((style?.maxWidthPercent ?? 88) / 100);
+  const requestedFontSize = width * ((style?.fontSizePercent ?? 5.5) / 100);
+  const fontSize = activeCaption
+    ? fitSingleLineFontSize(activeCaption.words, requestedFontSize, maxWidth)
+    : requestedFontSize;
   const paddingBottom = height * ((style?.bottomPercent ?? 28) / 100);
   const scale = activeCaption
     ? interpolate(
@@ -220,6 +227,7 @@ export function SubtitleVideo({
       {activeCaption ? (
         <AbsoluteFill
           style={{
+            boxSizing: "border-box",
             alignItems: "center",
             justifyContent: "flex-end",
             paddingBottom,
@@ -231,10 +239,12 @@ export function SubtitleVideo({
           <div
             style={{
               display: "inline-flex",
-              flexWrap: "wrap",
+              boxSizing: "border-box",
+              flexWrap: "nowrap",
               justifyContent: "center",
               gap: "0.22em",
               maxWidth,
+              whiteSpace: "nowrap",
               fontFamily:
                 "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
               fontSize,

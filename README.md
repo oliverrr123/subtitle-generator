@@ -60,6 +60,17 @@ Run the dev server:
 pnpm run dev
 ```
 
+Or, on macOS, install Spotlight/Raycast shortcuts:
+
+```bash
+./scripts/macos/install-shortcuts.sh
+```
+
+Then search for **Start Subgen** to launch the server at `http://localhost:3210`
+and open it in your browser,
+or **Stop Subgen** to shut it down. These shortcuts use Bun and write server logs
+to `~/.local/state/subgen/server.log`.
+
 Open:
 
 ```text

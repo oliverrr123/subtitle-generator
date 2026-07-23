@@ -1,9 +1,17 @@
 import { createReadStream } from "fs";
+import { mkdir } from "fs/promises";
 import path from "path";
 import OpenAI from "openai";
 import { groupWordsIntoLines, type WordTiming } from "@/lib/captions";
 import { extractAudio } from "@/lib/ffmpeg";
-import { createJobId, saveUpload, tmpRoot } from "@/lib/files";
+import {
+  createJobId,
+  saveUploadBytes,
+  tmpRoot,
+  uploadedFileExists,
+  uploadPath,
+} from "@/lib/files";
+import { parseMultipartRequest } from "@/lib/multipart";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -16,6 +24,94 @@ type TimedTextLine = {
   end: number;
   text: string;
 };
+
+function decodeFileName(value: string | null) {
+  if (!value) return "upload.mp4";
+
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+async function saveRequestVideo(request: Request, jobDir: string) {
+  const contentType = request.headers.get("content-type") ?? "";
+  const isJson = contentType.toLowerCase().includes("application/json");
+  const isMultipart = contentType.toLowerCase().includes("multipart/form-data");
+
+  if (isJson) {
+    const body = (await request.json()) as {
+      uploadId?: unknown;
+      name?: unknown;
+      dwigerMode?: unknown;
+    };
+    const uploadId = String(body.uploadId ?? "");
+    const name = String(body.name ?? "upload.mp4");
+
+    if (await uploadedFileExists(uploadId, name)) {
+      return {
+        videoPath: uploadPath(uploadId, name),
+        dwigerMode: body.dwigerMode === true,
+        error: null,
+      };
+    }
+
+    return {
+      videoPath: null,
+      dwigerMode: false,
+      error: "Uploaded video was not found. Select the video again.",
+    };
+  }
+
+  if (!isMultipart) {
+    const bytes = Buffer.from(await request.arrayBuffer());
+
+    if (!bytes.length) {
+      return {
+        videoPath: null,
+        dwigerMode: false,
+        error: "Upload a video file.",
+      };
+    }
+
+    return {
+      videoPath: await saveUploadBytes(
+        decodeFileName(request.headers.get("x-file-name")),
+        bytes,
+        jobDir,
+      ),
+      dwigerMode: request.headers.get("x-dwiger-mode") === "true",
+      error: null,
+    };
+  }
+
+  try {
+    const parts = await parseMultipartRequest(request);
+    const video = parts.get("video");
+
+    if (!video) {
+      return {
+        videoPath: null,
+        dwigerMode: false,
+        error: "Upload a video file.",
+      };
+    }
+
+    return {
+      videoPath: await saveUploadBytes(video.filename ?? "upload.mp4", video.data, jobDir),
+      dwigerMode: parts.get("dwigerMode")?.data.toString("utf8") === "true",
+      error: null,
+    };
+  } catch {
+    return {
+      videoPath: null,
+      dwigerMode: false,
+      error:
+        "Could not read the uploaded video. Try selecting the file again, or use a smaller MP4/MOV/WebM file.",
+    };
+  }
+}
 
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -160,18 +256,15 @@ export async function POST(request: Request) {
       );
     }
 
-    const formData = await request.formData();
-    const video = formData.get("video");
-    const dwigerMode = formData.get("dwigerMode") === "true";
-
-    if (!(video instanceof File)) {
-      return Response.json({ error: "Upload a video file." }, { status: 400 });
+    const jobDir = path.join(tmpRoot, createJobId());
+    const { videoPath, dwigerMode, error } = await saveRequestVideo(request, jobDir);
+    if (!videoPath) {
+      return Response.json({ error }, { status: 400 });
     }
 
-    const jobDir = path.join(tmpRoot, createJobId());
-    const videoPath = await saveUpload(video, jobDir);
     const audioPath = path.join(jobDir, "audio.m4a");
 
+    await mkdir(jobDir, { recursive: true });
     await extractAudio(videoPath, audioPath);
 
     const openai = new OpenAI({

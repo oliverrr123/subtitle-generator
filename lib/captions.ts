@@ -27,6 +27,35 @@ export function cleanWord(word: string) {
   return word.trim().replace(/\s+/g, " ");
 }
 
+export function endsSentence(word: string) {
+  return /[.!?…]["'”’\)\]]*$/.test(cleanWord(word));
+}
+
+export function estimateCaptionWidthEm(words: WordTiming[]) {
+  const text = words.map((word) => word.word).join(" ");
+
+  return Array.from(text).reduce((width, character) => {
+    if (character === " ") return width + 0.28;
+    if (/[ilI1'.,:;!|]/.test(character)) return width + 0.28;
+    if (/[mwMW@%&]/.test(character)) return width + 0.9;
+    if (/[A-Z0-9]/.test(character)) return width + 0.64;
+    return width + 0.54;
+  }, 0);
+}
+
+export function fitSingleLineFontSize(
+  words: WordTiming[],
+  requestedSize: number,
+  maxWidth: number,
+) {
+  // Heavy caption fonts render a little wider than their nominal glyph metrics.
+  // Keep a safety margin so one-line captions retain visible padding at both ends.
+  const estimatedTextWidth = estimateCaptionWidthEm(words) * 1.14;
+  const estimatedWidthWithPadding = estimatedTextWidth + 1.25;
+
+  return Math.min(requestedSize, maxWidth / Math.max(estimatedWidthWithPadding, 1));
+}
+
 export function groupWordsIntoLines(
   inputWords: WordTiming[],
   settings: CaptionSettings = defaultCaptionSettings,
@@ -61,6 +90,7 @@ export function groupWordsIntoLines(
     const proposedDuration = word.end - proposedStart;
     const gap = previous ? word.start - previous.end : 0;
     const shouldBreak =
+      Boolean(previous && endsSentence(previous.word)) ||
       current.length >= settings.maxWordsPerLine ||
       proposedDuration > settings.maxLineDuration ||
       gap > settings.gapThreshold;
