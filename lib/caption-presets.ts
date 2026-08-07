@@ -43,11 +43,6 @@ export const captionPresets: CaptionPreset[] = [
     description: "All-caps white text with a heavy outline.",
   },
   {
-    id: "creator-gradient",
-    name: "Creator Glow",
-    description: "Gradient box with crisp white creator captions.",
-  },
-  {
     id: "dark-bar",
     name: "Dark Bar",
     description: "High-contrast lower-third captions.",
@@ -56,11 +51,6 @@ export const captionPresets: CaptionPreset[] = [
     id: "minimal-soft",
     name: "Minimal",
     description: "Small, clean captions with a soft shadow.",
-  },
-  {
-    id: "bubblegum",
-    name: "Bubblegum",
-    description: "Playful pink sticker style for upbeat clips.",
   },
   {
     id: "neon-glow",
@@ -77,4 +67,3 @@ export const captionPresets: CaptionPreset[] = [
 export function isCaptionPresetId(value: unknown): value is CaptionPresetId {
   return captionPresetIds.includes(value as CaptionPresetId);
 }
-

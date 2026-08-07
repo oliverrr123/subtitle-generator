@@ -12,6 +12,7 @@ import {
   uploadPath,
 } from "@/lib/files";
 import { parseMultipartRequest } from "@/lib/multipart";
+import { normalizeTranscriptNumbers } from "@/lib/normalize-transcript";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -134,6 +135,8 @@ async function transcribeWithRetry(openai: OpenAI, audioPath: string) {
       return await openai.audio.transcriptions.create({
         file: createReadStream(audioPath),
         model: "whisper-1",
+        prompt:
+          "Write all spoken quantities with digits. Format percentages with %, and format dollar amounts with a $ sign and comma separators.",
         response_format: "verbose_json",
         timestamp_granularities: ["word"],
       });
@@ -282,13 +285,16 @@ export async function POST(request: Request) {
     ).words;
     const rawWords = Array.isArray(maybeWords) ? maybeWords : [];
 
-    const words: WordTiming[] = rawWords
-      .map((word) => ({
-        word: String(word.word ?? ""),
-        start: Number(word.start ?? 0),
-        end: Number(word.end ?? 0),
-      }))
-      .filter((word) => word.word.trim() && Number.isFinite(word.start));
+    const words = normalizeTranscriptNumbers(
+      rawWords
+        .map((word) => ({
+          word: String(word.word ?? ""),
+          start: Number(word.start ?? 0),
+          end: Number(word.end ?? 0),
+        }))
+        .filter((word) => word.word.trim() && Number.isFinite(word.start)),
+      transcript.text,
+    );
 
     if (!dwigerMode) {
       return Response.json({

@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Keep development assets isolated from `next build`. The macOS launcher
+  // leaves the dev server running, so sharing `.next` can invalidate its
+  // client chunks and leave a rendered page with no working interactions.
+  distDir: process.env.NODE_ENV === "development" ? ".next-dev" : ".next",
+  devIndicators: false,
   serverExternalPackages: [
     "@remotion/bundler",
     "@remotion/renderer",
@@ -14,6 +19,7 @@ const nextConfig: NextConfig = {
         ignored: [
           "**/node_modules/**",
           "**/.next/**",
+          "**/.next-dev/**",
           "**/uploads/**",
           "**/public/renders/**",
           "**/renders/**",

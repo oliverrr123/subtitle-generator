@@ -13,6 +13,8 @@ import {
 } from "react";
 import {
   Bookmark,
+  ChevronLeft,
+  ChevronRight,
   Download,
   Film,
   Heart,
@@ -20,12 +22,10 @@ import {
   MoreHorizontal,
   Music2,
   Plus,
-  RotateCcw,
   Search,
   Send,
   Share2,
   Upload,
-  WandSparkles,
 } from "lucide-react";
 import {
   defaultCaptionSettings,
@@ -117,6 +117,16 @@ async function uploadVideoFile(file: File): Promise<VideoSource> {
   };
 }
 
+function downloadRenderedVideo(url: string, sourceName: string) {
+  const baseName = sourceName.replace(/\.[^.]+$/, "") || "video";
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${baseName}-subtitled.mp4`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
 const defaultVideoDimensions: VideoDimensions = {
   width: 1280,
   height: 720,
@@ -127,8 +137,6 @@ const previewOverlays: { id: PreviewOverlay; name: string }[] = [
   { id: "tiktok", name: "TikTok" },
   { id: "instagram", name: "Instagram" },
 ];
-
-const exportFpsOptions: ExportFps[] = [24, 30, 60];
 
 const verticalVideoDefaults: VideoDefaults = {
   previewOverlay: "tiktok",
@@ -300,7 +308,7 @@ function PlatformOverlay({
 
 export default function Home() {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const controlPanelRef = useRef<HTMLElement>(null);
+  const controlPanelRef = useRef<HTMLDivElement>(null);
   const captionListRef = useRef<HTMLDivElement>(null);
   const captionRowRefs = useRef<(HTMLLabelElement | null)[]>([]);
   const autoDwigerFileKeyRef = useRef("");
@@ -334,6 +342,10 @@ export default function Home() {
   const [status, setStatus] = useState("Drop in a clip to start.");
   const [renderUrl, setRenderUrl] = useState("");
   const [isDraggingVideo, setIsDraggingVideo] = useState(false);
+  const [wizardStep, setWizardStep] = useState<0 | 1 | 2>(0);
+  const [wizardDirection, setWizardDirection] = useState<"forward" | "back">(
+    "forward",
+  );
 
   const captionLines = useMemo<CaptionLine[]>(
     () =>
@@ -365,8 +377,13 @@ export default function Home() {
     ? fitSingleLineFontSize(activeCaption.words, captionSize, captionWidth)
     : captionSize;
   const isBusy = state === "transcribing" || state === "rendering";
-  const canTranscribe = Boolean(videoSource) && !isBusy;
+  const hasCaptions = captionLines.length > 0;
   const canRender = Boolean(videoSource && captionLines.length && duration) && !isBusy;
+  const visibleStatus = /generated \d+ (?:\w+ )?word (?:timestamps|timings)/i.test(
+    status,
+  )
+    ? ""
+    : status;
   const platformProgress = duration
     ? Math.min(100, Math.max(0, (currentTime / duration) * 100))
     : 0;
@@ -376,6 +393,10 @@ export default function Home() {
       if (videoUrl) URL.revokeObjectURL(videoUrl);
     };
   }, [videoUrl]);
+
+  useEffect(() => {
+    controlPanelRef.current?.scrollTo({ top: 0, behavior: "auto" });
+  }, [wizardStep]);
 
   useEffect(() => {
     if (activeCaptionIndex < 0) return;
@@ -447,6 +468,8 @@ export default function Home() {
     setVideoUrl(URL.createObjectURL(file));
     setRenderUrl("");
     setState("idle");
+    setWizardDirection("forward");
+    setWizardStep(1);
 
     if (shouldPreserveCaptions) {
       autoAppliedDefaultsRef.current = true;
@@ -566,11 +589,7 @@ export default function Home() {
 
       setWords(result.words ?? []);
       setState("ready");
-      setStatus(
-        result.mode === "dwiger"
-          ? `Dwiger mode generated ${result.words?.length ?? 0} Czech word timings.`
-          : `Generated ${result.words?.length ?? 0} word timestamps.`,
-      );
+      setStatus("");
     } catch (error) {
       setState("error");
       setStatus(
@@ -626,7 +645,7 @@ export default function Home() {
     if (state === "rendered" || state === "error") {
       setState("ready");
     }
-    setStatus(tokens.length ? "Caption text updated." : "Caption line removed.");
+    setStatus("");
   }
 
   async function renderVideo() {
@@ -690,7 +709,8 @@ export default function Home() {
         if (job.status === "done" && job.url) {
           setRenderUrl(job.url);
           setState("rendered");
-          setStatus("Rendered video is ready.");
+          setStatus("Render complete. Download started automatically.");
+          downloadRenderedVideo(job.url, videoSource.name);
           return;
         }
 
@@ -728,19 +748,6 @@ export default function Home() {
     }
   }
 
-  function resetProject() {
-    if (videoUrl) URL.revokeObjectURL(videoUrl);
-    setVideoSource(null);
-    setVideoUrl("");
-    setDuration(0);
-    setWords([]);
-    setCurrentTime(0);
-    setRenderUrl("");
-    setState("idle");
-    autoDwigerFileKeyRef.current = "";
-    setStatus("Drop in a clip to start.");
-  }
-
   function handleWorkspaceWheel(event: WheelEvent<HTMLDivElement>) {
     if (window.innerWidth <= 960) return;
 
@@ -755,10 +762,35 @@ export default function Home() {
     });
   }
 
+  const canGoForward =
+    wizardStep === 0 ? Boolean(videoSource) : wizardStep === 1 ? hasCaptions : false;
+
+  function goBack() {
+    setWizardDirection("back");
+    setWizardStep((current) => (current === 2 ? 1 : 0));
+  }
+
+  function goForward() {
+    setWizardDirection("forward");
+    setWizardStep((current) => (current === 0 ? 1 : 2));
+  }
+
   return (
     <main className="app-shell">
       <div className="workspace" onWheel={handleWorkspaceWheel}>
-        <aside className="control-panel" ref={controlPanelRef}>
+        <aside className="control-panel">
+          <div className="wizard-progress" aria-label={`Step ${wizardStep + 1} of 3`}>
+            {[0, 1, 2].map((step) => (
+              <span className={step <= wizardStep ? "active" : ""} key={step} />
+            ))}
+          </div>
+          <div className="wizard-content" ref={controlPanelRef}>
+          <div
+            className={`wizard-page wizard-page-${wizardDirection}`}
+            key={wizardStep}
+          >
+          {wizardStep === 0 ? (
+            <>
           <label
             className={`dropzone ${isDraggingVideo ? "dragging" : ""}`}
             onDragOver={handleVideoDragOver}
@@ -789,9 +821,6 @@ export default function Home() {
           </label>
 
           <section className="section">
-            <div className="section-header">
-              <h2 className="section-title">Translation Mode</h2>
-            </div>
             <label className="mode-toggle">
               <input
                 type="checkbox"
@@ -806,7 +835,10 @@ export default function Home() {
               </span>
             </label>
           </section>
+            </>
+          ) : null}
 
+          {wizardStep === 1 ? (
           <section className="section">
             <div className="section-header">
               <h2 className="section-title">Caption Style</h2>
@@ -823,30 +855,8 @@ export default function Home() {
                   onClick={() => setCaptionPresetId(preset.id)}
                 >
                   <span>{preset.name}</span>
-                  <small>{preset.description}</small>
                 </button>
               ))}
-            </div>
-            <div className="overlay-setting">
-              <span className="setting-label">
-                <strong>Platform guide</strong>
-                <span>Preview only, not exported</span>
-              </span>
-              <div className="overlay-picker" aria-label="Platform preview overlay">
-                {previewOverlays.map((overlay) => (
-                  <button
-                    className={`overlay-option ${
-                      previewOverlay === overlay.id ? "selected" : ""
-                    }`}
-                    type="button"
-                    key={overlay.id}
-                    aria-pressed={previewOverlay === overlay.id}
-                    onClick={() => setPreviewOverlay(overlay.id)}
-                  >
-                    {overlay.name}
-                  </button>
-                ))}
-              </div>
             </div>
             <label className="setting-row">
               <span className="setting-label">
@@ -931,117 +941,129 @@ export default function Home() {
               />
             </label>
           </section>
+          ) : null}
 
-          <section className="section">
-            <div className="section-header">
-              <h2 className="section-title">Export Settings</h2>
-            </div>
-            <div className="export-setting">
-              <span className="setting-label">
-                <strong>Frame rate</strong>
-                <span>{exportFps} FPS MP4 export</span>
-              </span>
-              <div className="fps-picker" aria-label="Export frame rate">
-                {exportFpsOptions.map((fps) => (
+          {wizardStep === 2 ? (
+            <>
+            <section className="section">
+              <div className="section-header">
+                <h2 className="section-title">Social Overlay</h2>
+              </div>
+              <div className="overlay-picker" aria-label="Platform preview overlay">
+                {previewOverlays.map((overlay) => (
                   <button
-                    className={`fps-option ${exportFps === fps ? "selected" : ""}`}
+                    className={`overlay-option ${
+                      previewOverlay === overlay.id ? "selected" : ""
+                    }`}
                     type="button"
-                    key={fps}
-                    aria-pressed={exportFps === fps}
-                    onClick={() => setExportFps(fps)}
+                    key={overlay.id}
+                    aria-pressed={previewOverlay === overlay.id}
+                    onClick={() => setPreviewOverlay(overlay.id)}
                   >
-                    {fps}
+                    {overlay.name}
                   </button>
                 ))}
               </div>
-            </div>
-          </section>
-
-          <div className="action-row">
-            <button
-              className="primary-button"
-              type="button"
-              onClick={transcribeVideo}
-              disabled={!canTranscribe}
-            >
-              <WandSparkles size={18} />
-              Transcribe
-            </button>
-            <button
-              className="secondary-button"
-              type="button"
-              onClick={renderVideo}
-              disabled={!canRender}
-            >
-              <Film size={18} />
-              Render
-            </button>
-            <button
-              className="icon-button"
-              type="button"
-              onClick={resetProject}
-              disabled={isBusy && !videoSource}
-              aria-label="Reset"
-              title="Reset"
-            >
-              <RotateCcw size={18} />
-            </button>
-          </div>
-
-          <div className={`status-row ${state === "error" ? "error" : ""}`}>
-            {isBusy ? <span className="spinner" /> : null}
-            <span>{status}</span>
-          </div>
-
-          {renderUrl ? (
-            <a className="download-link" href={renderUrl} download>
-              <Download size={18} />
-              Download MP4
-            </a>
-          ) : null}
-
-          {editableCaptionLines.length ? (
-            <section className="section caption-editor">
-              <div className="caption-editor-header">
-                <h2 className="section-title">Caption Editor</h2>
-                <span className="caption-count">{editableCaptionLines.length}</span>
-              </div>
-              <div className="caption-edit-list" ref={captionListRef}>
-                {editableCaptionLines.map((line, index) => (
-                  <label
-                    className={`caption-edit-row ${
-                      index === activeCaptionIndex ? "active" : ""
-                    }`}
-                    key={line.id + "-" + line.start + "-" + line.end + "-" + line.text}
-                    ref={(element) => {
-                      captionRowRefs.current[index] = element;
-                    }}
-                    onClick={() => seekPreview(line.start)}
-                  >
-                    <span className="caption-time">
-                      {formatTimestamp(line.start)} - {formatTimestamp(line.end)}
-                    </span>
-                    <textarea
-                      className="caption-textarea"
-                      defaultValue={line.text}
-                      disabled={isBusy}
-                      rows={2}
-                      spellCheck
-                      onBlur={(event) =>
-                        updateCaptionLine(line, event.currentTarget.value)
-                      }
-                      onKeyDown={(event) => {
-                        if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-                          event.currentTarget.blur();
-                        }
-                      }}
-                    />
-                  </label>
-                ))}
-              </div>
             </section>
+
+            {editableCaptionLines.length ? (
+              <section className="section caption-editor">
+                <h2 className="section-title">Caption Editor</h2>
+                <div className="caption-edit-list" ref={captionListRef}>
+                  {editableCaptionLines.map((line, index) => (
+                    <label
+                      className={`caption-edit-row ${
+                        index === activeCaptionIndex ? "active" : ""
+                      }`}
+                      key={line.id + "-" + line.start + "-" + line.end + "-" + line.text}
+                      ref={(element) => {
+                        captionRowRefs.current[index] = element;
+                      }}
+                      onClick={() => seekPreview(line.start)}
+                    >
+                      <span className="caption-time">
+                        {formatTimestamp(line.start)} - {formatTimestamp(line.end)}
+                      </span>
+                      <input
+                        className="caption-input"
+                        type="text"
+                        defaultValue={line.text}
+                        disabled={isBusy}
+                        spellCheck
+                        onBlur={(event) =>
+                          updateCaptionLine(line, event.currentTarget.value)
+                        }
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.currentTarget.blur();
+                          }
+                        }}
+                      />
+                    </label>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            <div className="action-row">
+              <button
+                className="primary-button"
+                type="button"
+                onClick={renderVideo}
+                disabled={!canRender}
+              >
+                <Film size={18} />
+                {state === "rendering" ? "Rendering…" : "Render"}
+              </button>
+            </div>
+
+            {renderUrl ? (
+              <a className="download-link" href={renderUrl} download>
+                <Download size={18} />
+                Download MP4
+              </a>
+            ) : null}
+            </>
           ) : null}
 
+          {visibleStatus ? (
+            <div className={`status-row ${state === "error" ? "error" : ""}`}>
+              {isBusy ? <span className="spinner" /> : null}
+              <span>{visibleStatus}</span>
+            </div>
+          ) : null}
+          </div>
+          </div>
+
+          <nav className="wizard-nav" aria-label="Wizard navigation">
+            {wizardStep > 0 ? (
+              <button
+                className="wizard-arrow"
+                type="button"
+                onClick={goBack}
+                disabled={state === "rendering"}
+                aria-label="Previous step"
+              >
+                <ChevronLeft size={22} />
+              </button>
+            ) : (
+              <span aria-hidden="true" />
+            )}
+            <span>Step {wizardStep + 1} of 3</span>
+            {wizardStep < 2 ? (
+              <button
+                className="wizard-arrow wizard-arrow-next"
+                type="button"
+                onClick={goForward}
+                disabled={!canGoForward || state === "rendering"}
+                aria-label="Next step"
+              >
+                <ChevronRight size={22} />
+              </button>
+            ) : (
+              <span aria-hidden="true" />
+            )}
+          </nav>
         </aside>
 
         <section className="preview-panel">
@@ -1083,8 +1105,11 @@ export default function Home() {
               ) : (
                 <div className="empty-preview">
                   <div>
-                    <Film size={34} />
-                    <p>Video preview</p>
+                    <span className="empty-preview-icon">
+                      <Film size={28} strokeWidth={1.8} />
+                    </span>
+                    <strong>Your preview appears here</strong>
+                    <p>Upload a video to start creating captions.</p>
                   </div>
                 </div>
               )}
