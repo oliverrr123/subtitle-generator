@@ -135,8 +135,6 @@ async function transcribeWithRetry(openai: OpenAI, audioPath: string) {
       return await openai.audio.transcriptions.create({
         file: createReadStream(audioPath),
         model: "whisper-1",
-        prompt:
-          "Write all spoken quantities with digits. Format percentages with %, and format dollar amounts with a $ sign and comma separators.",
         response_format: "verbose_json",
         timestamp_granularities: ["word"],
       });

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1200" viewBox="0 0 900 1200">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8eafc1"/>
+      <stop offset="0.52" stop-color="#d4ae83"/>
+      <stop offset="1" stop-color="#384939"/>
+    </linearGradient>
+  </defs>
+  <rect width="900" height="1200" rx="34" fill="url(#sky)"/>
+  <circle cx="650" cy="220" r="84" fill="#fff" opacity=".34"/>
+  <path d="M0 630 190 460l125 102 180-202 405 314v526H0Z" fill="#1c2e24" opacity=".87"/>
+  <text x="450" y="820" text-anchor="middle" fill="#fff" stroke="#000" stroke-width="2.2"
+        paint-order="stroke fill" stroke-linejoin="round"
+        font-family="Helvetica Neue, SF Pro Display, SF Pro Text, Arial, sans-serif"
+        font-size="62" font-weight="700">Make every second count.</text>
+</svg>

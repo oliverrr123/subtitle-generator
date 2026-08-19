@@ -1,4 +1,5 @@
 export const captionPresetIds = [
+  "neon-glow",
   "clean-pill",
   "tiktok-pop",
   "karaoke-yellow",
@@ -7,7 +8,6 @@ export const captionPresetIds = [
   "dark-bar",
   "minimal-soft",
   "bubblegum",
-  "neon-glow",
   "editorial",
 ] as const;
 
@@ -19,9 +19,14 @@ export type CaptionPreset = {
   description: string;
 };
 
-export const defaultCaptionPresetId: CaptionPresetId = "clean-pill";
+export const defaultCaptionPresetId: CaptionPresetId = "neon-glow";
 
 export const captionPresets: CaptionPreset[] = [
+  {
+    id: "neon-glow",
+    name: "Instagram",
+    description: "Classic white Instagram captions with a thin black outline.",
+  },
   {
     id: "clean-pill",
     name: "Clean Pill",
@@ -51,11 +56,6 @@ export const captionPresets: CaptionPreset[] = [
     id: "minimal-soft",
     name: "Minimal",
     description: "Small, clean captions with a soft shadow.",
-  },
-  {
-    id: "neon-glow",
-    name: "Neon",
-    description: "Electric cyan text with a glow treatment.",
   },
   {
     id: "editorial",

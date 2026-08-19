@@ -126,14 +126,14 @@ const assThemeByPreset: Record<CaptionPresetId, AssTheme> = {
     boxPaddingScale: 0.22,
   },
   "neon-glow": {
-    fontName: "Inter",
+    fontName: "Helvetica Neue",
     activeColor: "#ffffff",
-    inactiveColor: "#bdfdff",
-    outlineColor: "#001a1f",
-    backColor: "#001a1f",
+    inactiveColor: "#ffffff",
+    outlineColor: "#000000",
+    backColor: "#000000",
     borderStyle: 1,
-    outline: 2,
-    shadow: 1,
+    outline: 1,
+    shadow: 0,
     bold: true,
     italic: false,
   },
@@ -217,7 +217,7 @@ export function createAssFromCaptionLines({
 }) {
   const presetId = style?.preset ?? defaultCaptionPresetId;
   const theme = assThemeByPreset[presetId];
-  const fontSize = Math.max(18, Math.round(width * ((style?.fontSizePercent ?? 5.5) / 100)));
+  const fontSize = Math.max(18, Math.round(width * ((style?.fontSizePercent ?? 6) / 100)));
   const maxWidth = width * ((style?.maxWidthPercent ?? 88) / 100);
   const sideMargin = Math.max(24, Math.round((width - maxWidth) / 2));
   const bottomMargin = Math.max(

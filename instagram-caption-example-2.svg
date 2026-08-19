@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675">
+  <defs>
+    <linearGradient id="city" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#18202d"/>
+      <stop offset="0.55" stop-color="#66463d"/>
+      <stop offset="1" stop-color="#ba7554"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="675" fill="url(#city)"/>
+  <circle cx="960" cy="122" r="70" fill="#ffd8a0" opacity=".65"/>
+  <path d="M0 442h150V310h90v132h110V252h135v190h100V335h92v107h118V288h148v154h257v233H0Z" fill="#10151c" opacity=".9"/>
+  <text x="600" y="530" text-anchor="middle" fill="#fff" stroke="#000" stroke-width="2"
+        paint-order="stroke fill" stroke-linejoin="round"
+        font-family="Helvetica Neue, SF Pro Display, SF Pro Text, Arial, sans-serif"
+        font-size="48" font-weight="700">Simple. Clear. Easy to read.</text>
+</svg>

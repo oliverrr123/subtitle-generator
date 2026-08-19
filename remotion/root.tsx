@@ -22,7 +22,7 @@ export function RemotionRoot() {
           lines: [],
           style: {
             preset: "clean-pill",
-            fontSizePercent: 5.5,
+            fontSizePercent: 6,
             maxWidthPercent: 88,
             bottomPercent: 28,
           },
@@ -55,7 +55,7 @@ export function RemotionRoot() {
           lines: [],
           style: {
             preset: "clean-pill",
-            fontSizePercent: 5.5,
+            fontSizePercent: 6,
             maxWidthPercent: 88,
             bottomPercent: 28,
           },

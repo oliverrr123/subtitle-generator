@@ -147,14 +147,17 @@ const renderPresetStyles: Record<CaptionPresetId, RenderPresetStyle> = {
   },
   "neon-glow": {
     container: {
-      padding: "0.12em 0.16em",
+      padding: "0.08em 0.12em",
       borderRadius: 0,
       background: "transparent",
-      color: "#bdfdff",
+      color: "#fff",
+      fontFamily:
+        "Helvetica Neue, SF Pro Display, SF Pro Text, Arial, sans-serif",
+      fontWeight: 700,
       textShadow:
-        "0 0 0.12em #00f0ff, 0 0 0.34em rgba(0,240,255,0.74), 0 0.08em 0.08em #001a1f",
+        "0.025em 0 #000, -0.025em 0 #000, 0 0.025em #000, 0 -0.025em #000, 0.018em 0.018em #000, -0.018em 0.018em #000, 0.018em -0.018em #000, -0.018em -0.018em #000",
     },
-    word: { color: "rgba(189,253,255,0.42)" },
+    word: { color: "#fff" },
     activeWord: { color: "#fff" },
   },
   editorial: {
@@ -190,12 +193,12 @@ export function SubtitleVideo({
     : defaultCaptionPresetId;
   const presetStyle = renderPresetStyles[presetId];
   const maxWidth = width * ((style?.maxWidthPercent ?? 88) / 100);
-  const requestedFontSize = width * ((style?.fontSizePercent ?? 5.5) / 100);
+  const requestedFontSize = width * ((style?.fontSizePercent ?? 6) / 100);
   const fontSize = activeCaption
     ? fitSingleLineFontSize(activeCaption.words, requestedFontSize, maxWidth)
     : requestedFontSize;
   const paddingBottom = height * ((style?.bottomPercent ?? 28) / 100);
-  const scale = activeCaption
+  const scale = activeCaption && presetId !== "neon-glow"
     ? interpolate(
         time,
         [activeCaption.start, activeCaption.start + 0.12],

@@ -166,6 +166,8 @@ export async function overlayImageSequenceOnVideo({
   imageSequencePattern,
   firstFrameIndex,
   fps,
+  width,
+  height,
   outputPath,
   onProgress,
 }: {
@@ -173,10 +175,15 @@ export async function overlayImageSequenceOnVideo({
   imageSequencePattern: string;
   firstFrameIndex: number;
   fps: number;
+  width: number;
+  height: number;
   outputPath: string;
   onProgress?: (seconds: number) => void;
 }) {
-  const filter = "[0:v][1:v]overlay=0:0:format=auto[v]";
+  const filter =
+    `[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
+    `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black[base];` +
+    "[base][1:v]overlay=0:0:format=auto[v]";
   const baseArgs = [
     "-y",
     "-i",
@@ -210,11 +217,11 @@ export async function overlayImageSequenceOnVideo({
           "-allow_sw",
           "1",
           "-b:v",
-          "20M",
+          "6000k",
           "-maxrate",
-          "28M",
+          "6000k",
           "-bufsize",
-          "40M",
+          "12000k",
           "-pix_fmt",
           "yuv420p",
           "-c:a",
@@ -239,8 +246,12 @@ export async function overlayImageSequenceOnVideo({
       "libx264",
       "-preset",
       "veryfast",
-      "-crf",
-      "18",
+      "-b:v",
+      "6000k",
+      "-maxrate",
+      "6000k",
+      "-bufsize",
+      "12000k",
       "-pix_fmt",
       "yuv420p",
       "-c:a",

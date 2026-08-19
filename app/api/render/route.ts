@@ -57,7 +57,7 @@ const renderPayloadSchema = z.object({
   style: z
     .object({
       preset: z.enum(captionPresetIds).optional(),
-      fontSizePercent: z.number().min(2).max(5.5),
+      fontSizePercent: z.number().min(2).max(10),
       maxWidthPercent: z.number().min(38).max(88),
       bottomPercent: z.number().min(4).max(42).optional(),
     })
@@ -86,6 +86,18 @@ type RenderInputProps = {
     bottomPercent?: number;
   };
 };
+
+function get1080pDimensions(width: number, height: number) {
+  const maxWidth = width >= height ? 1920 : 1080;
+  const maxHeight = width >= height ? 1080 : 1920;
+  const scale = Math.min(1, maxWidth / width, maxHeight / height);
+
+  // H.264 with yuv420p requires even dimensions.
+  return {
+    width: Math.max(2, Math.floor((width * scale) / 2) * 2),
+    height: Math.max(2, Math.floor((height * scale) / 2) * 2),
+  };
+}
 
 async function readRenderRequest(request: Request, directory: string) {
   const contentType = request.headers.get("content-type") ?? "";
@@ -239,6 +251,8 @@ async function renderJob({
       imageSequencePattern: frames.assetsInfo.imageSequenceName,
       firstFrameIndex: frames.assetsInfo.firstFrameIndex,
       fps: inputProps.exportFps,
+      width: inputProps.width,
+      height: inputProps.height,
       outputPath,
       onProgress: (seconds) => {
         const duration = Math.max(0.001, inputProps.durationInSeconds);
@@ -298,11 +312,15 @@ export async function POST(request: Request) {
 
     const outputPath = path.join(publicJobDir, "subtitled.mp4");
     const overlayFramesDir = path.join(publicJobDir, "overlay-frames");
+    const dimensions = get1080pDimensions(
+      payload.width ?? 1280,
+      payload.height ?? 720,
+    );
     const inputProps: RenderInputProps = {
       lines: payload.lines,
       durationInSeconds: payload.durationInSeconds,
-      width: payload.width ?? 1280,
-      height: payload.height ?? 720,
+      width: dimensions.width,
+      height: dimensions.height,
       exportFps: payload.exportFps ?? 30,
       style: payload.style,
     };

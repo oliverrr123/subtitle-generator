@@ -984,7 +984,7 @@ a:focus-visible,
 }
 
 .caption-pill {
-  --caption-size: 5.5;
+  --caption-size: 6;
   --caption-width: 88%;
   --caption-bg: rgba(255, 255, 255, 0.96);
   --caption-color: #111;
@@ -1014,7 +1014,7 @@ a:focus-visible,
   background: var(--caption-bg);
   color: var(--caption-color);
   font-family: var(--caption-font);
-  font-size: clamp(16px, calc(var(--caption-size) * 1cqw), 60px);
+  font-size: clamp(16px, calc(var(--caption-size) * 1cqw), 120px);
   font-weight: var(--caption-weight);
   line-height: 1.08;
   letter-spacing: 0;
@@ -1130,14 +1130,23 @@ a:focus-visible,
 
 .caption-pill[data-preset="neon-glow"] {
   --caption-bg: transparent;
-  --caption-color: #bdfdff;
-  --caption-muted: rgba(189, 253, 255, 0.42);
+  --caption-color: #fff;
+  --caption-muted: #fff;
   --caption-active: #fff;
   --caption-shadow: none;
-  --caption-text-shadow: 0 0 0.12em #00f0ff,
-    0 0 0.34em rgba(0, 240, 255, 0.74), 0 0.08em 0.08em #001a1f;
-  padding: 0.12em 0.16em;
+  --caption-text-shadow: 0.025em 0 #000, -0.025em 0 #000,
+    0 0.025em #000, 0 -0.025em #000, 0.018em 0.018em #000,
+    -0.018em 0.018em #000, 0.018em -0.018em #000,
+    -0.018em -0.018em #000;
+  --caption-font: "Helvetica Neue", "SF Pro Display", "SF Pro Text", Arial,
+    sans-serif;
+  --caption-weight: 700;
+  padding: 0.08em 0.12em;
   border-radius: 0;
+}
+
+.caption-pill[data-preset="neon-glow"] .caption-word {
+  transition: none;
 }
 
 .caption-pill[data-preset="editorial"] {
@@ -1174,11 +1183,15 @@ a:focus-visible,
   display: grid;
   gap: 6px;
   padding: 8px;
+  border: 1px solid transparent;
   border-radius: 12px;
   background: #fff;
   cursor: pointer;
   transition:
-    background 150ms ease;
+    background 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    transform 150ms ease;
 }
 
 .caption-edit-row:hover {
@@ -1186,11 +1199,22 @@ a:focus-visible,
 }
 
 .caption-edit-row.active {
-  background: #fff;
+  border: 2px solid var(--accent);
+  padding: 7px;
+  background: rgba(0, 0, 0, 0.08);
+  box-shadow:
+    inset 5px 0 0 var(--accent),
+    0 4px 14px rgba(0, 0, 0, 0.12);
+  transform: translateX(1px);
 }
 
 .caption-edit-row.active .caption-time {
   color: var(--accent-dark);
+}
+
+.caption-edit-row.active .caption-input {
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
 }
 
 .caption-time {

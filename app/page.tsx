@@ -142,7 +142,7 @@ const verticalVideoDefaults: VideoDefaults = {
   previewOverlay: "tiktok",
   maxWordsPerLine: defaultCaptionSettings.maxWordsPerLine,
   maxLineDuration: defaultCaptionSettings.maxLineDuration,
-  captionSize: 5.5,
+  captionSize: 6,
   captionWidth: 88,
   captionBottom: 28,
   exportFps: 30,
@@ -150,9 +150,9 @@ const verticalVideoDefaults: VideoDefaults = {
 
 const horizontalVideoDefaults: VideoDefaults = {
   previewOverlay: "none",
-  maxWordsPerLine: 7,
-  maxLineDuration: 2.6,
-  captionSize: 4,
+  maxWordsPerLine: defaultCaptionSettings.maxWordsPerLine,
+  maxLineDuration: defaultCaptionSettings.maxLineDuration,
+  captionSize: 6,
   captionWidth: 88,
   captionBottom: 14,
   exportFps: 60,
@@ -334,6 +334,7 @@ export default function Home() {
   const [captionPresetId, setCaptionPresetId] = useState<CaptionPresetId>(
     defaultCaptionPresetId,
   );
+  const [selectedCaptionIndex, setSelectedCaptionIndex] = useState(-1);
   const [previewOverlay, setPreviewOverlay] =
     useState<PreviewOverlay>(verticalVideoDefaults.previewOverlay);
   const [dwigerMode, setDwigerMode] = useState(false);
@@ -373,6 +374,8 @@ export default function Home() {
   const activeCaptionIndex = activeCaption
     ? captionLines.findIndex((line) => line.id === activeCaption.id)
     : -1;
+  const highlightedCaptionIndex =
+    activeCaptionIndex >= 0 ? activeCaptionIndex : selectedCaptionIndex;
   const fittedCaptionSize = activeCaption
     ? fitSingleLineFontSize(activeCaption.words, captionSize, captionWidth)
     : captionSize;
@@ -399,10 +402,10 @@ export default function Home() {
   }, [wizardStep]);
 
   useEffect(() => {
-    if (activeCaptionIndex < 0) return;
+    if (highlightedCaptionIndex < 0) return;
 
     const list = captionListRef.current;
-    const row = captionRowRefs.current[activeCaptionIndex];
+    const row = captionRowRefs.current[highlightedCaptionIndex];
     if (!list || !row) return;
 
     const listRect = list.getBoundingClientRect();
@@ -419,6 +422,12 @@ export default function Home() {
           (list.clientHeight - rowRect.height) / 2,
         behavior: "smooth",
       });
+    }
+  }, [highlightedCaptionIndex]);
+
+  useEffect(() => {
+    if (activeCaptionIndex >= 0) {
+      setSelectedCaptionIndex(activeCaptionIndex);
     }
   }, [activeCaptionIndex]);
 
@@ -882,7 +891,7 @@ export default function Home() {
               <input
                 className="number-input"
                 type="number"
-                min="1.4"
+                min="0.3"
                 max="4"
                 step="0.1"
                 value={maxLineDuration}
@@ -900,7 +909,7 @@ export default function Home() {
                 className="range-input"
                 type="range"
                 min="2"
-                max="5.5"
+                max="10"
                 step="0.1"
                 value={captionSize}
                 onChange={(event) => setCaptionSize(Number(event.target.value))}
@@ -973,13 +982,19 @@ export default function Home() {
                   {editableCaptionLines.map((line, index) => (
                     <label
                       className={`caption-edit-row ${
-                        index === activeCaptionIndex ? "active" : ""
+                        index === highlightedCaptionIndex ? "active" : ""
                       }`}
+                      aria-current={
+                        index === highlightedCaptionIndex ? "true" : undefined
+                      }
                       key={line.id + "-" + line.start + "-" + line.end + "-" + line.text}
                       ref={(element) => {
                         captionRowRefs.current[index] = element;
                       }}
-                      onClick={() => seekPreview(line.start)}
+                      onClick={() => {
+                        setSelectedCaptionIndex(index);
+                        seekPreview(line.start);
+                      }}
                     >
                       <span className="caption-time">
                         {formatTimestamp(line.start)} - {formatTimestamp(line.end)}
