@@ -7,6 +7,10 @@ build
 .env
 .env.local
 .env.*.local
+.env.*
+!.env.example
+!.env.*.example
+*.tsbuildinfo
 uploads
 renders
 public/uploads

@@ -53,6 +53,7 @@ const renderPayloadSchema = z.object({
   width: z.number().int().min(240).max(4096).optional(),
   height: z.number().int().min(240).max(4096).optional(),
   exportFps: z.union([z.literal(24), z.literal(30), z.literal(60)]).optional(),
+  bitrateKbps: z.number().int().min(100).max(100000).nullable().optional(),
   lines: z.array(captionLineSchema),
   style: z
     .object({
@@ -79,6 +80,7 @@ type RenderInputProps = {
   width: number;
   height: number;
   exportFps: 24 | 30 | 60;
+  bitrateKbps?: number | null;
   style?: {
     preset?: CaptionPresetId;
     fontSizePercent: number;
@@ -253,6 +255,7 @@ async function renderJob({
       fps: inputProps.exportFps,
       width: inputProps.width,
       height: inputProps.height,
+      bitrateKbps: inputProps.bitrateKbps,
       outputPath,
       onProgress: (seconds) => {
         const duration = Math.max(0.001, inputProps.durationInSeconds);
@@ -322,6 +325,7 @@ export async function POST(request: Request) {
       width: dimensions.width,
       height: dimensions.height,
       exportFps: payload.exportFps ?? 30,
+      bitrateKbps: payload.bitrateKbps,
       style: payload.style,
     };
 

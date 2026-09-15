@@ -1258,6 +1258,55 @@ a:focus-visible,
   text-decoration: none;
 }
 
+.bitrate-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  background: rgba(118, 118, 128, 0.06);
+}
+
+.bitrate-toggle,
+.bitrate-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.bitrate-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.bitrate-value input {
+  width: 88px;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  border-radius: 9px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.bitrate-value input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.bitrate-unlimited {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);

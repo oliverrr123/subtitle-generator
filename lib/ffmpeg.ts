@@ -24,12 +24,18 @@ export function getFfmpegPath() {
   return fallbackPath;
 }
 
-export async function extractAudio(videoPath: string, audioPath: string) {
-  await runFfmpeg([
+export async function extractAudio(
+  videoPath: string,
+  audioPath: string,
+  range?: { start: number; end: number },
+) {
+  const output = await runFfmpeg([
     "-y",
     "-i",
     videoPath,
+    ...(range ? ["-ss", String(range.start), "-t", String(range.end - range.start)] : []),
     "-vn",
+    ...(range ? ["-af", "volumedetect"] : []),
     "-ar",
     "16000",
     "-ac",
@@ -42,6 +48,10 @@ export async function extractAudio(videoPath: string, audioPath: string) {
     "+faststart",
     audioPath,
   ]);
+
+  // Avoid sending effectively silent gaps back to the speech recognizer.
+  const peak = output.match(/max_volume: (-?\d+(?:\.\d+)?|-inf) dB/);
+  return !peak || Number(peak[1]) > -50;
 }
 
 export async function transcodeVideoForRender(
@@ -168,6 +178,7 @@ export async function overlayImageSequenceOnVideo({
   fps,
   width,
   height,
+  bitrateKbps,
   outputPath,
   onProgress,
 }: {
@@ -177,9 +188,21 @@ export async function overlayImageSequenceOnVideo({
   fps: number;
   width: number;
   height: number;
+  bitrateKbps?: number | null;
   outputPath: string;
   onProgress?: (seconds: number) => void;
 }) {
+  const bitrateArgs = bitrateKbps
+    ? [
+        "-b:v",
+        `${bitrateKbps}k`,
+        "-maxrate",
+        `${bitrateKbps}k`,
+        "-bufsize",
+        `${bitrateKbps * 2}k`,
+      ]
+    : [];
+  const softwareRateControlArgs = bitrateKbps ? bitrateArgs : ["-crf", "18"];
   const filter =
     `[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
     `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black[base];` +
@@ -207,7 +230,10 @@ export async function overlayImageSequenceOnVideo({
     outputPath,
   ];
 
-  if (os.platform() === "darwin") {
+  // VideoToolbox chooses an implicit target bitrate when none is provided.
+  // Use quality-based libx264 for the uncapped option so "Unlimited" really
+  // has no target or maximum bitrate.
+  if (os.platform() === "darwin" && bitrateKbps) {
     try {
       await runFfmpeg(
         [
@@ -216,12 +242,7 @@ export async function overlayImageSequenceOnVideo({
           "h264_videotoolbox",
           "-allow_sw",
           "1",
-          "-b:v",
-          "6000k",
-          "-maxrate",
-          "6000k",
-          "-bufsize",
-          "12000k",
+          ...bitrateArgs,
           "-pix_fmt",
           "yuv420p",
           "-c:a",
@@ -246,12 +267,7 @@ export async function overlayImageSequenceOnVideo({
       "libx264",
       "-preset",
       "veryfast",
-      "-b:v",
-      "6000k",
-      "-maxrate",
-      "6000k",
-      "-bufsize",
-      "12000k",
+      ...softwareRateControlArgs,
       "-pix_fmt",
       "yuv420p",
       "-c:a",
@@ -268,7 +284,7 @@ function runFfmpeg(
   args: string[],
   options?: { onProgress?: (seconds: number) => void },
 ) {
-  return new Promise<void>((resolve, reject) => {
+  return new Promise<string>((resolve, reject) => {
     const ffmpeg = spawn(getFfmpegPath(), args, {
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -295,7 +311,7 @@ function runFfmpeg(
     ffmpeg.on("error", reject);
     ffmpeg.on("close", (code) => {
       if (code === 0) {
-        resolve();
+        resolve(stderr);
         return;
       }
 

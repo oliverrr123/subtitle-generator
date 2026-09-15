@@ -13,6 +13,7 @@ import {
 } from "@/lib/files";
 import { parseMultipartRequest } from "@/lib/multipart";
 import { normalizeTranscriptNumbers } from "@/lib/normalize-transcript";
+import { findTranscriptionGaps, offsetRecoveredWords } from "@/lib/transcription-gaps";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -275,6 +276,22 @@ export async function POST(request: Request) {
     });
 
     const transcript = await transcribeWithRetry(openai, audioPath);
+
+    // Whisper can omit a quiet speaker after a louder opening. Give long
+    // uncaptioned sections their own pass, keeping their original timestamps.
+    const gaps = findTranscriptionGaps(transcript.words ?? [], transcript.duration);
+    const recoveredWords: WordTiming[] = [];
+    for (const [index, gap] of gaps.entries()) {
+      const gapPath = path.join(jobDir, `audio-gap-${index}.m4a`);
+      if (!(await extractAudio(videoPath, gapPath, gap))) continue;
+      const recovered = await transcribeWithRetry(openai, gapPath);
+      recoveredWords.push(...offsetRecoveredWords(recovered.words ?? [], gap));
+    }
+    if (recoveredWords.length) {
+      transcript.words = [...(transcript.words ?? []), ...recoveredWords]
+        .sort((a, b) => a.start - b.start);
+      transcript.text = transcript.words.map((word) => word.word).join(" ");
+    }
 
     const maybeWords = (
       transcript as unknown as {

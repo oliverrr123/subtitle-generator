@@ -339,6 +339,8 @@ export default function Home() {
     useState<PreviewOverlay>(verticalVideoDefaults.previewOverlay);
   const [dwigerMode, setDwigerMode] = useState(false);
   const [exportFps, setExportFps] = useState<ExportFps>(verticalVideoDefaults.exportFps);
+  const [limitBitrate, setLimitBitrate] = useState(true);
+  const [bitrateKbps, setBitrateKbps] = useState(6000);
   const [state, setState] = useState<JobState>("idle");
   const [status, setStatus] = useState("Drop in a clip to start.");
   const [renderUrl, setRenderUrl] = useState("");
@@ -677,6 +679,7 @@ export default function Home() {
             width: videoDimensions.width,
             height: videoDimensions.height,
             exportFps,
+            bitrateKbps: limitBitrate ? bitrateKbps : null,
             lines: captionLines,
             style: {
               preset: captionPresetId,
@@ -1030,6 +1033,37 @@ export default function Home() {
                 <Film size={18} />
                 {state === "rendering" ? "Rendering…" : "Render"}
               </button>
+            </div>
+
+            <div className="bitrate-setting">
+              <label className="bitrate-toggle">
+                <input
+                  type="checkbox"
+                  checked={limitBitrate}
+                  disabled={state === "rendering"}
+                  onChange={(event) => setLimitBitrate(event.target.checked)}
+                />
+                <span>Limit bitrate</span>
+              </label>
+              {limitBitrate ? (
+                <label className="bitrate-value">
+                  <input
+                    type="number"
+                    min={100}
+                    max={100000}
+                    step={100}
+                    value={bitrateKbps}
+                    disabled={state === "rendering"}
+                    onChange={(event) =>
+                      setBitrateKbps(Math.max(100, Number(event.target.value) || 100))
+                    }
+                    aria-label="Video bitrate in kilobits per second"
+                  />
+                  <span>kbps</span>
+                </label>
+              ) : (
+                <span className="bitrate-unlimited">Unlimited</span>
+              )}
             </div>
 
             {renderUrl ? (
