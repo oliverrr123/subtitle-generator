@@ -1,7 +1,7 @@
 import { mkdir, rm } from "fs/promises";
 import path from "path";
 import { bundle } from "@remotion/bundler";
-import { renderFrames, selectComposition } from "@remotion/renderer";
+import { getVideoMetadata, renderFrames, selectComposition } from "@remotion/renderer";
 import { z } from "zod";
 import { type CaptionLine } from "@/lib/captions";
 import { captionPresetIds, type CaptionPresetId } from "@/lib/caption-presets";
@@ -52,7 +52,6 @@ const renderPayloadSchema = z.object({
   durationInSeconds: z.number().positive().max(600),
   width: z.number().int().min(240).max(4096).optional(),
   height: z.number().int().min(240).max(4096).optional(),
-  exportFps: z.union([z.literal(24), z.literal(30), z.literal(60)]).optional(),
   bitrateKbps: z.number().int().min(100).max(100000).nullable().optional(),
   lines: z.array(captionLineSchema),
   style: z
@@ -79,7 +78,7 @@ type RenderInputProps = {
   durationInSeconds: number;
   width: number;
   height: number;
-  exportFps: 24 | 30 | 60;
+  exportFps: number;
   bitrateKbps?: number | null;
   style?: {
     preset?: CaptionPresetId;
@@ -319,12 +318,16 @@ export async function POST(request: Request) {
       payload.width ?? 1280,
       payload.height ?? 720,
     );
+    const { fps } = await getVideoMetadata(videoPath);
+    if (!Number.isFinite(fps) || fps <= 0) {
+      throw new Error("Could not determine the source video's frame rate.");
+    }
     const inputProps: RenderInputProps = {
       lines: payload.lines,
       durationInSeconds: payload.durationInSeconds,
       width: dimensions.width,
       height: dimensions.height,
-      exportFps: payload.exportFps ?? 30,
+      exportFps: fps,
       bitrateKbps: payload.bitrateKbps,
       style: payload.style,
     };

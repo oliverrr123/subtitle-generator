@@ -23,7 +23,7 @@ export type SubtitleVideoProps = {
   durationInSeconds: number;
   width: number;
   height: number;
-  exportFps: 24 | 30 | 60;
+  exportFps: number;
   showVideo?: boolean;
   transparentBackground?: boolean;
   style?: {

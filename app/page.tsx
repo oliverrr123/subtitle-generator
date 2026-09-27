@@ -70,7 +70,6 @@ type VideoDimensions = {
 };
 
 type PreviewOverlay = "none" | "tiktok" | "instagram";
-type ExportFps = 24 | 30 | 60;
 type VideoDefaults = {
   previewOverlay: PreviewOverlay;
   maxWordsPerLine: number;
@@ -78,7 +77,6 @@ type VideoDefaults = {
   captionSize: number;
   captionWidth: number;
   captionBottom: number;
-  exportFps: ExportFps;
 };
 
 type VideoSource = {
@@ -145,7 +143,6 @@ const verticalVideoDefaults: VideoDefaults = {
   captionSize: 6,
   captionWidth: 88,
   captionBottom: 28,
-  exportFps: 30,
 };
 
 const horizontalVideoDefaults: VideoDefaults = {
@@ -155,7 +152,6 @@ const horizontalVideoDefaults: VideoDefaults = {
   captionSize: 6,
   captionWidth: 88,
   captionBottom: 14,
-  exportFps: 60,
 };
 
 function getDefaultsForVideoDimensions(
@@ -353,7 +349,6 @@ export default function Home() {
   const [previewOverlay, setPreviewOverlay] =
     useState<PreviewOverlay>(verticalVideoDefaults.previewOverlay);
   const [dwigerMode, setDwigerMode] = useState(false);
-  const [exportFps, setExportFps] = useState<ExportFps>(verticalVideoDefaults.exportFps);
   const [limitBitrate, setLimitBitrate] = useState(false);
   const [bitrateKbps, setBitrateKbps] = useState(6000);
   const [state, setState] = useState<JobState>("idle");
@@ -449,7 +444,6 @@ export default function Home() {
     setCaptionSize(defaults.captionSize);
     setCaptionWidth(defaults.captionWidth);
     setCaptionBottom(defaults.captionBottom);
-    setExportFps(defaults.exportFps);
   }
 
   async function loadVideoFile(file: File) {
@@ -734,7 +728,6 @@ export default function Home() {
             durationInSeconds: duration,
             width: videoDimensions.width,
             height: videoDimensions.height,
-            exportFps,
             bitrateKbps: limitBitrate ? bitrateKbps : null,
             lines: captionLines.filter((line) => line.words.length > 0),
             style: {

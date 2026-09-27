@@ -206,7 +206,7 @@ export async function overlayImageSequenceOnVideo({
   const filter =
     `[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
     `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black[base];` +
-    "[base][1:v]overlay=0:0:format=auto[v]";
+    "[base][1:v]overlay=0:0:format=auto:eof_action=repeat:shortest=0[v]";
   const baseArgs = [
     "-y",
     "-i",
@@ -223,8 +223,12 @@ export async function overlayImageSequenceOnVideo({
     "[v]",
     "-map",
     "0:a?",
-    "-r",
-    String(fps),
+    // Keep the source video's timestamps, including variable frame timing.
+    // `fps` above controls only the subtitle image sequence.
+    "-fps_mode",
+    "passthrough",
+    "-enc_time_base",
+    "-1",
     "-movflags",
     "+faststart",
     outputPath,
