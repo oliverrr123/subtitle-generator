@@ -13,6 +13,7 @@ import {
 } from "react";
 import {
   Bookmark,
+  Check,
   ChevronLeft,
   ChevronRight,
   Download,
@@ -60,7 +61,6 @@ type RenderJobStatus = {
 };
 
 type EditableCaptionLine = CaptionLine & {
-  startIndex: number;
   text: string;
 };
 
@@ -189,9 +189,22 @@ async function readJsonResponse<T>(response: Response): Promise<T> {
 }
 
 function formatTimestamp(seconds: number) {
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = Math.max(0, seconds - minutes * 60);
+  const rounded = Math.round(Math.max(0, seconds) * 10) / 10;
+  const minutes = Math.floor(rounded / 60);
+  const remainingSeconds = rounded - minutes * 60;
   return minutes + ":" + remainingSeconds.toFixed(1).padStart(4, "0");
+}
+
+function retimeCaption(line: CaptionLine, start: number, end: number): CaptionLine {
+  const scale = (end - start) / Math.max(line.end - line.start, 0.001);
+  return {
+    ...line, start, end,
+    words: line.words.map((word) => ({
+      ...word,
+      start: start + (word.start - line.start) * scale,
+      end: start + (word.end - line.start) * scale,
+    })),
+  };
 }
 
 function splitCaptionText(text: string) {
@@ -310,7 +323,7 @@ export default function Home() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const controlPanelRef = useRef<HTMLDivElement>(null);
   const captionListRef = useRef<HTMLDivElement>(null);
-  const captionRowRefs = useRef<(HTMLLabelElement | null)[]>([]);
+  const captionRowRefs = useRef<(HTMLDivElement | null)[]>([]);
   const autoDwigerFileKeyRef = useRef("");
   const autoAppliedDefaultsRef = useRef(false);
   const transcribeInFlightRef = useRef(false);
@@ -321,6 +334,8 @@ export default function Home() {
   );
   const [duration, setDuration] = useState(0);
   const [words, setWords] = useState<WordTiming[]>([]);
+  const [editedLines, setEditedLines] = useState<CaptionLine[] | null>(null);
+  const [newCaptionId, setNewCaptionId] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [maxWordsPerLine, setMaxWordsPerLine] = useState(
     verticalVideoDefaults.maxWordsPerLine,
@@ -339,7 +354,7 @@ export default function Home() {
     useState<PreviewOverlay>(verticalVideoDefaults.previewOverlay);
   const [dwigerMode, setDwigerMode] = useState(false);
   const [exportFps, setExportFps] = useState<ExportFps>(verticalVideoDefaults.exportFps);
-  const [limitBitrate, setLimitBitrate] = useState(true);
+  const [limitBitrate, setLimitBitrate] = useState(false);
   const [bitrateKbps, setBitrateKbps] = useState(6000);
   const [state, setState] = useState<JobState>("idle");
   const [status, setStatus] = useState("Drop in a clip to start.");
@@ -352,27 +367,20 @@ export default function Home() {
 
   const captionLines = useMemo<CaptionLine[]>(
     () =>
-      groupWordsIntoLines(words, {
+      editedLines ?? groupWordsIntoLines(words, {
         ...defaultCaptionSettings,
         maxWordsPerLine,
         maxLineDuration,
       }),
-    [maxLineDuration, maxWordsPerLine, words],
+    [editedLines, maxLineDuration, maxWordsPerLine, words],
   );
   const editableCaptionLines = useMemo<EditableCaptionLine[]>(() => {
-    let startIndex = 0;
-
-    return captionLines.map((line) => {
-      const editableLine = {
-        ...line,
-        startIndex,
-        text: line.words.map((word) => word.word).join(" "),
-      };
-      startIndex += line.words.length;
-      return editableLine;
-    });
+    return captionLines.map((line) => ({
+      ...line,
+      text: line.words.map((word) => word.word).join(" "),
+    }));
   }, [captionLines]);
-  const activeCaption = getActiveCaption(captionLines, currentTime);
+  const activeCaption = getActiveCaption(captionLines.filter((line) => line.words.length > 0), currentTime);
   const activeCaptionIndex = activeCaption
     ? captionLines.findIndex((line) => line.id === activeCaption.id)
     : -1;
@@ -382,8 +390,8 @@ export default function Home() {
     ? fitSingleLineFontSize(activeCaption.words, captionSize, captionWidth)
     : captionSize;
   const isBusy = state === "transcribing" || state === "rendering";
-  const hasCaptions = captionLines.length > 0;
-  const canRender = Boolean(videoSource && captionLines.length && duration) && !isBusy;
+  const hasCaptions = captionLines.some((line) => line.words.length > 0);
+  const canRender = Boolean(videoSource && hasCaptions && duration) && !isBusy;
   const visibleStatus = /generated \d+ (?:\w+ )?word (?:timestamps|timings)/i.test(
     status,
   )
@@ -451,7 +459,7 @@ export default function Home() {
       return;
     }
 
-    const shouldPreserveCaptions = words.length > 0;
+    const shouldPreserveCaptions = captionLines.length > 0;
     setState("idle");
     setStatus(
       shouldPreserveCaptions
@@ -494,6 +502,7 @@ export default function Home() {
     autoDwigerFileKeyRef.current = "";
     setDuration(0);
     setWords([]);
+    setEditedLines(null);
     setCurrentTime(0);
     setStatus(
       dwigerMode
@@ -599,6 +608,7 @@ export default function Home() {
       }
 
       setWords(result.words ?? []);
+      setEditedLines(null);
       setState("ready");
       setStatus("");
     } catch (error) {
@@ -625,38 +635,84 @@ export default function Home() {
     void transcribeVideo();
   }, [videoSource, isBusy, transcribeVideo]);
 
-  function updateCaptionLine(line: EditableCaptionLine, text: string) {
-    const tokens = splitCaptionText(text);
-
-    setWords((previousWords) => {
-      const startIndex = Math.min(line.startIndex, previousWords.length);
-      const endIndex = Math.min(startIndex + line.words.length, previousWords.length);
-      const lineDuration = Math.max(0.04 * Math.max(tokens.length, 1), line.end - line.start);
-      const step = tokens.length ? lineDuration / tokens.length : 0;
-      const nextLineWords: WordTiming[] = tokens.map((word, index) => {
-        const start = line.start + step * index;
-        const end = index === tokens.length - 1 ? line.start + lineDuration : line.start + step * (index + 1);
-
-        return {
-          word,
-          start: Number(start.toFixed(3)),
-          end: Number(end.toFixed(3)),
-        };
-      });
-      const nextWords = [
-        ...previousWords.slice(0, startIndex),
-        ...nextLineWords,
-        ...previousWords.slice(endIndex),
-      ];
-
-      return nextWords;
-    });
-
+  function invalidateRender() {
     setRenderUrl("");
-    if (state === "rendered" || state === "error") {
-      setState("ready");
-    }
+    if (state === "rendered" || state === "error") setState("ready");
     setStatus("");
+  }
+
+  function updateCaptionLine(line: EditableCaptionLine, text: string) {
+    if (text === line.text) return;
+    const tokens = splitCaptionText(text);
+    setEditedLines((previous) => (previous ?? captionLines).map((item) => {
+      if (item.id !== line.id) return item;
+      const step = (item.end - item.start) / Math.max(tokens.length, 1);
+      return {
+        ...item,
+        words: tokens.map((word, index) => ({
+          word,
+          start: item.start + step * index,
+          end: index === tokens.length - 1 ? item.end : item.start + step * (index + 1),
+        })),
+      };
+    }));
+    invalidateRender();
+  }
+
+  function updateCaptionTime(line: CaptionLine, field: "start" | "end", input: HTMLInputElement) {
+    const parts = input.value.trim().split(":");
+    const validFormat = /^(?:\d+:)?\d+(?:\.\d+)?$/.test(input.value.trim());
+    const seconds = Number(parts[parts.length - 1]);
+    const value = parts.length === 2 ? Number(parts[0]) * 60 + seconds : seconds;
+    const index = captionLines.findIndex((item) => item.id === line.id);
+    const start = field === "start" ? value : line.start;
+    const end = field === "end" ? value : line.end;
+    if (!validFormat || !Number.isFinite(value) || (parts.length === 2 && seconds >= 60) ||
+        start < 0 || end <= start || (duration > 0 && end > duration) ||
+        (index > 0 && start < captionLines[index - 1].end) ||
+        (index < captionLines.length - 1 && end > captionLines[index + 1].start)) {
+      input.value = formatTimestamp(line[field]);
+      setStatus("Use seconds or m:ss.s. Times must stay within the video, end after the start, and not overlap adjacent slides.");
+      return;
+    }
+    input.value = formatTimestamp(value);
+    if (value === line[field]) return;
+    setEditedLines((previous) => (previous ?? captionLines).map((item) =>
+      item.id === line.id ? retimeCaption(item, start, end) : item,
+    ));
+    invalidateRender();
+  }
+
+  function addCaptionAfter(line: CaptionLine) {
+    const index = captionLines.findIndex((item) => item.id === line.id);
+    const nextStart = captionLines[index + 1]?.start ?? duration;
+    const hasGap = nextStart - line.end >= 0.1;
+    const start = hasGap ? line.end : (line.start + line.end) / 2;
+    const end = hasGap ? Math.min(nextStart, start + 1) : line.end;
+    if (end - start < 0.05) {
+      setStatus("Make this slide longer to create space for a new paragraph.");
+      return;
+    }
+    const id = crypto.randomUUID();
+    setEditedLines((previous) => {
+      const lines = [...(previous ?? captionLines)];
+      const position = lines.findIndex((item) => item.id === line.id);
+      if (!hasGap) lines[position] = retimeCaption(lines[position], line.start, start);
+      lines.splice(position + 1, 0, { id, start, end, words: [] });
+      return lines;
+    });
+    videoRef.current?.pause();
+    setSelectedCaptionIndex(index + 1);
+    setNewCaptionId(id);
+    seekPreview(start);
+    invalidateRender();
+    if (!hasGap) setStatus("New paragraph added using the second half of this slide’s time. You can edit both times.");
+  }
+
+  function regroupCaptions() {
+    if (editedLines) setWords(editedLines.flatMap((line) => line.words));
+    setEditedLines(null);
+    invalidateRender();
   }
 
   async function renderVideo() {
@@ -680,7 +736,7 @@ export default function Home() {
             height: videoDimensions.height,
             exportFps,
             bitrateKbps: limitBitrate ? bitrateKbps : null,
-            lines: captionLines,
+            lines: captionLines.filter((line) => line.words.length > 0),
             style: {
               preset: captionPresetId,
               fontSizePercent: captionSize,
@@ -882,7 +938,7 @@ export default function Home() {
                 max="8"
                 value={maxWordsPerLine}
                 onChange={(event) =>
-                  setMaxWordsPerLine(Number(event.target.value))
+                  { regroupCaptions(); setMaxWordsPerLine(Number(event.target.value)); }
                 }
               />
             </label>
@@ -899,7 +955,7 @@ export default function Home() {
                 step="0.1"
                 value={maxLineDuration}
                 onChange={(event) =>
-                  setMaxLineDuration(Number(event.target.value))
+                  { regroupCaptions(); setMaxLineDuration(Number(event.target.value)); }
                 }
               />
             </label>
@@ -944,7 +1000,7 @@ export default function Home() {
                 className="range-input"
                 type="range"
                 min="4"
-                max="42"
+                max="90"
                 step="1"
                 value={captionBottom}
                 onChange={(event) =>
@@ -983,14 +1039,14 @@ export default function Home() {
                 <h2 className="section-title">Caption Editor</h2>
                 <div className="caption-edit-list" ref={captionListRef}>
                   {editableCaptionLines.map((line, index) => (
-                    <label
+                    <div
                       className={`caption-edit-row ${
                         index === highlightedCaptionIndex ? "active" : ""
                       }`}
                       aria-current={
                         index === highlightedCaptionIndex ? "true" : undefined
                       }
-                      key={line.id + "-" + line.start + "-" + line.end + "-" + line.text}
+                      key={line.id}
                       ref={(element) => {
                         captionRowRefs.current[index] = element;
                       }}
@@ -999,13 +1055,49 @@ export default function Home() {
                         seekPreview(line.start);
                       }}
                     >
-                      <span className="caption-time">
-                        {formatTimestamp(line.start)} - {formatTimestamp(line.end)}
-                      </span>
+                      <div className="caption-time-row">
+                        <div className="caption-time">
+                          {(["start", "end"] as const).map((field) => (
+                            <span className="caption-time-field" key={field}>
+                              {field === "end" ? <span aria-hidden="true">–</span> : null}
+                              <input
+                                key={`${line.id}-${field}-${line[field]}`}
+                                className="caption-time-input"
+                                type="text"
+                                inputMode="decimal"
+                                aria-label={`Slide ${index + 1} ${field} time`}
+                                title="Seconds or m:ss.s"
+                                defaultValue={formatTimestamp(line[field])}
+                                disabled={isBusy}
+                                onClick={(event) => event.stopPropagation()}
+                                onBlur={(event) => updateCaptionTime(line, field, event.currentTarget)}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Escape") event.currentTarget.value = formatTimestamp(line[field]);
+                                  if (event.key === "Enter" || event.key === "Escape") event.currentTarget.blur();
+                                }}
+                              />
+                            </span>
+                          ))}
+                        </div>
+                        <button
+                          className="caption-add-button"
+                          type="button"
+                          aria-label={`Add paragraph after slide ${index + 1}`}
+                          title="Add paragraph after this slide"
+                          disabled={isBusy}
+                          onClick={(event) => { event.stopPropagation(); addCaptionAfter(line); }}
+                        >
+                          <Plus size={16} aria-hidden="true" />
+                        </button>
+                      </div>
                       <input
+                        key={line.id + "-text-" + line.text}
                         className="caption-input"
                         type="text"
                         defaultValue={line.text}
+                        aria-label={`Slide ${index + 1} paragraph`}
+                        placeholder="Type a new paragraph…"
+                        autoFocus={line.id === newCaptionId}
                         disabled={isBusy}
                         spellCheck
                         onBlur={(event) =>
@@ -1017,7 +1109,7 @@ export default function Home() {
                           }
                         }}
                       />
-                    </label>
+                    </div>
                   ))}
                 </div>
               </section>
@@ -1029,9 +1121,15 @@ export default function Home() {
                 type="button"
                 onClick={renderVideo}
                 disabled={!canRender}
+                aria-live="polite"
+                title={state === "rendered" ? "Render again" : undefined}
               >
-                <Film size={18} />
-                {state === "rendering" ? "Rendering…" : "Render"}
+                {state === "rendered" ? <Check size={18} /> : <Film size={18} />}
+                {state === "rendering"
+                  ? "Rendering…"
+                  : state === "rendered"
+                    ? "Downloaded"
+                    : "Render"}
               </button>
             </div>
 

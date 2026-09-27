@@ -60,7 +60,7 @@ const renderPayloadSchema = z.object({
       preset: z.enum(captionPresetIds).optional(),
       fontSizePercent: z.number().min(2).max(10),
       maxWidthPercent: z.number().min(38).max(88),
-      bottomPercent: z.number().min(4).max(42).optional(),
+      bottomPercent: z.number().min(4).max(90).optional(),
     })
     .optional(),
 });

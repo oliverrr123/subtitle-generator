@@ -1403,3 +1403,63 @@ a:focus-visible,
     animation-iteration-count: 1 !important;
   }
 }
+
+.caption-time-row,
+.caption-time,
+.caption-time-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.caption-time-row {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.caption-time-input {
+  width: 8ch;
+  min-width: 0;
+  padding: 4px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.caption-time-input:hover {
+  border-color: rgba(0, 0, 0, 0.16);
+}
+
+.caption-time-input:focus-visible,
+.caption-add-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  background: #fff;
+}
+
+.caption-add-button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: rgba(118, 118, 128, 0.1);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.caption-add-button:hover {
+  background: rgba(118, 118, 128, 0.2);
+}
+
+.caption-add-button:disabled,
+.caption-time-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

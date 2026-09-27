@@ -18,8 +18,8 @@ export type CaptionSettings = {
 };
 
 export const defaultCaptionSettings: CaptionSettings = {
-  maxWordsPerLine: 3,
-  maxLineDuration: 0.7,
+  maxWordsPerLine: 5,
+  maxLineDuration: 1.3,
   gapThreshold: 0.42,
 };
 
