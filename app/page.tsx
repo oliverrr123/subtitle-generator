@@ -149,7 +149,7 @@ const horizontalVideoDefaults: VideoDefaults = {
   previewOverlay: "none",
   maxWordsPerLine: defaultCaptionSettings.maxWordsPerLine,
   maxLineDuration: defaultCaptionSettings.maxLineDuration,
-  captionSize: 6,
+  captionSize: 4,
   captionWidth: 88,
   captionBottom: 14,
 };
